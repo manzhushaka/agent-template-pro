@@ -1,0 +1,57 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <!-- 继承根 POM 的统一坐标、版本管理与构建默认配置。 -->
+  <parent>
+    <groupId>com.manzhushaka</groupId>
+    <artifactId>agent-template-pro</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <!-- 组装全部应用层的可运行 Spring Boot 应用模块。 -->
+  <artifactId>agent-boot</artifactId>
+  <dependencies>
+    <!-- 面向对话场景的 HTTP 接口。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>api-chat</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- 面向控制台场景的 HTTP 接口。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>api-console</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- 具体技术集成与基础设施适配器。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>agent-infrastructure</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- 组装到应用中的 SPI 演示实现。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>agent-demo</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- 生产环境健康检查与运维端点。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <!-- 测试依赖仅在当前模块测试类路径中生效。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <!-- 将当前组装模块重新打包为可执行的 Spring Boot 应用。 -->
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

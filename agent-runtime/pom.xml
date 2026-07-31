@@ -1,0 +1,29 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <!-- 继承根 POM 的统一坐标、版本管理与构建默认配置。 -->
+  <parent>
+    <groupId>com.manzhushaka</groupId>
+    <artifactId>agent-template-pro</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <!-- 实现领域契约并负责编排执行流程的运行时层。 -->
+  <artifactId>agent-runtime</artifactId>
+  <dependencies>
+    <!-- 当前模块实现和编排的领域 SPI 契约。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>agent-domain-spi</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- 提供依赖注入和应用上下文抽象。 -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-context</artifactId>
+    </dependency>
+    <!-- 用于运行时请求、响应和状态数据的 JSON 绑定。 -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+  </dependencies>
+</project>

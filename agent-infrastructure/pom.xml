@@ -1,0 +1,24 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <!-- 继承根 POM 的统一坐标、版本管理与构建默认配置。 -->
+  <parent>
+    <groupId>com.manzhushaka</groupId>
+    <artifactId>agent-template-pro</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <!-- 提供运行时具体集成实现的基础设施适配层。 -->
+  <artifactId>agent-infrastructure</artifactId>
+  <dependencies>
+    <!-- 基础设施适配器需要实现的运行时扩展点。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>agent-runtime</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- 支持适配器注册和生命周期管理。 -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-context</artifactId>
+    </dependency>
+  </dependencies>
+</project>

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <!-- Spring Boot 统一管理依赖版本并提供默认构建配置。 -->
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.14</version>
+    <relativePath/>
+  </parent>
+  <groupId>com.manzhushaka</groupId>
+  <artifactId>agent-template-pro</artifactId>
+  <version>0.1.0</version>
+  <!-- 当前工程仅聚合各模块，不产出可运行制品。 -->
+  <packaging>pom</packaging>
+  <name>agent-template-pro</name>
+  <!-- 先构建公共层，再构建 API 与应用模块。 -->
+  <modules>
+    <module>agent-common</module>
+    <module>agent-domain-spi</module>
+    <module>agent-runtime</module>
+    <module>agent-infrastructure</module>
+    <module>api-chat</module>
+    <module>api-console</module>
+    <module>agent-demo</module>
+    <module>agent-boot</module>
+  </modules>
+  <!-- Reactor 中所有模块共用的版本配置。 -->
+  <properties>
+    <java.version>21</java.version>
+    <maven.compiler.release>21</maven.compiler.release>
+    <spring-ai.version>1.1.2</spring-ai.version>
+  </properties>
+  <!-- 导入 Spring AI BOM，子模块可直接使用其受管版本。 -->
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.ai</groupId>
+        <artifactId>spring-ai-bom</artifactId>
+        <version>${spring-ai.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <!-- 集中管理插件配置；可执行模块按需显式启用插件。 -->
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-maven-plugin</artifactId>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>

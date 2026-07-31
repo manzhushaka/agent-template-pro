@@ -1,0 +1,16 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21', cache: maven }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: 'ui-chat/package.json' }
+      - run: mvn -B -s .mvn/settings-ci.xml verify
+      - run: npm install && npm run build
+        working-directory: ui-chat
+      - run: npm install && npm run build
+        working-directory: ui-console

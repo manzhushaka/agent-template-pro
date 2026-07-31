@@ -1,0 +1,24 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <!-- 继承根 POM 的统一坐标、版本管理与构建默认配置。 -->
+  <parent>
+    <groupId>com.manzhushaka</groupId>
+    <artifactId>agent-template-pro</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <!-- 领域 SPI 的演示实现模块。 -->
+  <artifactId>agent-demo</artifactId>
+  <dependencies>
+    <!-- 演示智能体组件需要实现的 SPI 契约。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>agent-domain-spi</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- 支持演示组件的 Spring 注册。 -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-context</artifactId>
+    </dependency>
+  </dependencies>
+</project>

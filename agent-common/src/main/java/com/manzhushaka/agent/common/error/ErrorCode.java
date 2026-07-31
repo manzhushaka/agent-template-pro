@@ -1,0 +1,5 @@
+package com.manzhushaka.agent.common.error;
+
+public enum ErrorCode {
+    RESOURCE_NOT_FOUND, CONVERSATION_FORBIDDEN, TASK_CONFIRMATION_CONFLICT, VALIDATION_FAILED, REQUEST_DUPLICATED
+}

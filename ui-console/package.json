@@ -1,0 +1,8 @@
+{
+  "name": "agent-template-pro-console",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": { "dev": "vite", "build": "vue-tsc --noEmit && vite build" },
+  "dependencies": { "@element-plus/icons-vue": "^2.3.1", "element-plus": "^2.9.6", "vue": "^3.5.13" },
+  "devDependencies": { "@vitejs/plugin-vue": "^5.2.3", "typescript": "^5.7.3", "vite": "^6.2.3", "vue-tsc": "^2.2.10" }
+}

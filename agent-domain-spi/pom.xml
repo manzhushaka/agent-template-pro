@@ -1,0 +1,19 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <!-- 继承根 POM 的统一坐标、版本管理与构建默认配置。 -->
+  <parent>
+    <groupId>com.manzhushaka</groupId>
+    <artifactId>agent-template-pro</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <!-- 定义由运行时层消费的领域契约与 SPI 接口。 -->
+  <artifactId>agent-domain-spi</artifactId>
+  <dependencies>
+    <!-- 复用与具体运行时实现无关的公共类型。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>agent-common</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+  </dependencies>
+</project>

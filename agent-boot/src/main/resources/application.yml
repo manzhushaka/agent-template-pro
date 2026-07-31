@@ -1,0 +1,18 @@
+server:
+  port: ${SERVER_PORT:8080}
+spring:
+  application:
+    name: agent-template-pro
+  main:
+    web-application-type: reactive
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+agent:
+  visitor:
+    cookie-name: ${VISITOR_COOKIE_NAME:agent_visitor}
+    signing-key: ${VISITOR_COOKIE_SIGNING_KEY:local-development-key-change-me}
+  console:
+    access-key: ${CONSOLE_ACCESS_KEY:local-console-key}

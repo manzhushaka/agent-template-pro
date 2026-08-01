@@ -357,6 +357,13 @@ onMounted(() => {
       </div>
     </header>
 
+    <nav class="mobile-nav" aria-label="控制台导航">
+      <button :class="{ active: active === 'overview' }" type="button" @click="navigate('overview')"><el-icon :size="16"><DataAnalysis /></el-icon><span>总览</span></button>
+      <button :class="{ active: active === 'agents' }" type="button" @click="navigate('agents')"><el-icon :size="16"><Connection /></el-icon><span>Agent</span></button>
+      <button :class="{ active: active === 'tasks' }" type="button" @click="navigate('tasks')"><el-icon :size="16"><Tickets /></el-icon><span>任务</span></button>
+      <button :class="{ active: active === 'config' }" type="button" @click="navigate('config')"><el-icon :size="16"><Setting /></el-icon><span>配置</span></button>
+    </nav>
+
     <main class="workspace" v-loading="loading && !overview">
       <header class="workspace-header">
         <div><p class="eyebrow">AGENT RUNTIME / {{ active.toUpperCase() }}</p><h1>{{ title }}</h1></div>
@@ -367,46 +374,50 @@ onMounted(() => {
       </header>
       <p v-if="error" class="page-error">{{ error }}</p>
 
-      <section v-if="active === 'overview'" class="overview">
-        <div class="metric-grid">
-          <article><span>运行状态</span><strong class="healthy">{{ overview?.health || '-' }}</strong><small>服务可用性摘要</small></article>
-          <article><span>任务总数</span><strong>{{ overview?.taskTotal ?? '-' }}</strong><small>当前运行内存中的任务</small></article>
-          <article><span>等待中</span><strong>{{ overview?.activeTasks ?? '-' }}</strong><small>等待外部结果或用户确认</small></article>
-          <article><span>领域 Agent</span><strong>{{ overview?.agentTotal ?? '-' }}</strong><small>代码注册且通过启动校验</small></article>
+      <Transition name="section-switch" mode="out-in">
+        <div :key="active" class="workspace-view">
+          <section v-if="active === 'overview'" class="overview">
+            <div class="metric-grid">
+              <article><span>运行状态</span><strong class="healthy">{{ overview?.health || '-' }}</strong><small>服务可用性摘要</small></article>
+              <article><span>任务总数</span><strong>{{ overview?.taskTotal ?? '-' }}</strong><small>当前运行内存中的任务</small></article>
+              <article><span>等待中</span><strong>{{ overview?.activeTasks ?? '-' }}</strong><small>等待外部结果或用户确认</small></article>
+              <article><span>领域 Agent</span><strong>{{ overview?.agentTotal ?? '-' }}</strong><small>代码注册且通过启动校验</small></article>
+            </div>
+            <section class="operation-panel">
+              <div class="panel-header"><div><h2>运行边界</h2><p>模型提出意图，确定性动作负责校验、确认和执行。</p></div><el-tag type="success" effect="plain">{{ overview?.mode || 'loading' }}</el-tag></div>
+              <div class="boundary-grid"><div><span>身份</span><b>签名访客 Cookie</b></div><div><span>会话</span><b>服务端归属校验</b></div><div><span>高风险动作</span><b>强制二次确认</b></div></div>
+            </section>
+          </section>
+
+          <section v-if="active === 'agents'" class="agent-section">
+            <div class="table-toolbar"><div><h2>领域 Agent 注册表</h2><p>只读展示运行时真实注册信息，不提供在线注入动作能力。</p></div><el-tag type="success" effect="plain">REGISTRY READY</el-tag></div>
+            <div class="agent-grid">
+              <article v-for="agent in agents" :key="agent.code">
+                <header><div><small>{{ agent.code }}</small><h3>{{ agent.displayName }}</h3></div><el-tag :type="agent.enabled ? 'success' : 'info'" effect="plain">{{ agent.enabled ? '启用' : '停用' }}</el-tag></header>
+                <dl><div><dt>C 端可见</dt><dd>{{ agent.visibleToVisitor ? '是' : '否' }}</dd></div><div><dt>注册动作</dt><dd>{{ agent.actionCount }}</dd></div><div><dt>路由器</dt><dd>{{ agent.routerStatus }}</dd></div></dl>
+                <footer><el-tag v-for="(count, mode) in agent.actionModes" :key="mode" size="small" effect="plain">{{ mode }} {{ count }}</el-tag></footer>
+                <p class="agent-metrics">路由 {{ agent.routeTotal }} · 澄清 {{ agent.ambiguousTotal }} · 失败 {{ agent.failureTotal }}</p>
+              </article>
+            </div>
+          </section>
+
+          <section v-if="active === 'tasks'" class="table-section">
+            <div class="table-toolbar"><div><h2>任务执行记录</h2><p>确认、调用和异步状态均以任务为追踪入口。</p></div><el-button @click="load">刷新列表</el-button></div>
+            <el-table :data="tasks" v-loading="loading" empty-text="暂无任务记录">
+              <el-table-column prop="id" label="任务 ID" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="actionCode" label="动作" min-width="190" />
+              <el-table-column label="状态" width="190"><template #default="scope"><el-tag :type="scope.row.status === 'SUCCEEDED' ? 'success' : scope.row.status.includes('WAITING') ? 'warning' : 'info'">{{ scope.row.status }}</el-tag></template></el-table-column>
+              <el-table-column prop="externalRef" label="外部引用" min-width="160" />
+              <el-table-column prop="createdAt" label="创建时间" min-width="180" />
+            </el-table>
+          </section>
+
+          <section v-if="active === 'config'" class="config-section">
+            <div class="panel-header"><div><h2>非敏感运行配置</h2><p>密钥和值不会通过控制台 API 返回。</p></div><el-icon class="monitor" :size="24"><Monitor /></el-icon></div>
+            <dl v-if="config"><template v-for="(value, key) in config" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></template></dl>
+          </section>
         </div>
-        <section class="operation-panel">
-          <div class="panel-header"><div><h2>运行边界</h2><p>模型提出意图，确定性动作负责校验、确认和执行。</p></div><el-tag type="success" effect="plain">{{ overview?.mode || 'loading' }}</el-tag></div>
-          <div class="boundary-grid"><div><span>身份</span><b>签名访客 Cookie</b></div><div><span>会话</span><b>服务端归属校验</b></div><div><span>高风险动作</span><b>强制二次确认</b></div></div>
-        </section>
-      </section>
-
-      <section v-if="active === 'agents'" class="agent-section">
-        <div class="table-toolbar"><div><h2>领域 Agent 注册表</h2><p>只读展示运行时真实注册信息，不提供在线注入动作能力。</p></div><el-tag type="success" effect="plain">REGISTRY READY</el-tag></div>
-        <div class="agent-grid">
-          <article v-for="agent in agents" :key="agent.code">
-            <header><div><small>{{ agent.code }}</small><h3>{{ agent.displayName }}</h3></div><el-tag :type="agent.enabled ? 'success' : 'info'" effect="plain">{{ agent.enabled ? '启用' : '停用' }}</el-tag></header>
-            <dl><div><dt>C 端可见</dt><dd>{{ agent.visibleToVisitor ? '是' : '否' }}</dd></div><div><dt>注册动作</dt><dd>{{ agent.actionCount }}</dd></div><div><dt>路由器</dt><dd>{{ agent.routerStatus }}</dd></div></dl>
-            <footer><el-tag v-for="(count, mode) in agent.actionModes" :key="mode" size="small" effect="plain">{{ mode }} {{ count }}</el-tag></footer>
-            <p class="agent-metrics">路由 {{ agent.routeTotal }} · 澄清 {{ agent.ambiguousTotal }} · 失败 {{ agent.failureTotal }}</p>
-          </article>
-        </div>
-      </section>
-
-      <section v-if="active === 'tasks'" class="table-section">
-        <div class="table-toolbar"><div><h2>任务执行记录</h2><p>确认、调用和异步状态均以任务为追踪入口。</p></div><el-button @click="load">刷新列表</el-button></div>
-        <el-table :data="tasks" v-loading="loading" empty-text="暂无任务记录">
-          <el-table-column prop="id" label="任务 ID" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="actionCode" label="动作" min-width="190" />
-          <el-table-column label="状态" width="190"><template #default="scope"><el-tag :type="scope.row.status === 'SUCCEEDED' ? 'success' : scope.row.status.includes('WAITING') ? 'warning' : 'info'">{{ scope.row.status }}</el-tag></template></el-table-column>
-          <el-table-column prop="externalRef" label="外部引用" min-width="160" />
-          <el-table-column prop="createdAt" label="创建时间" min-width="180" />
-        </el-table>
-      </section>
-
-      <section v-if="active === 'config'" class="config-section">
-        <div class="panel-header"><div><h2>非敏感运行配置</h2><p>密钥和值不会通过控制台 API 返回。</p></div><el-icon class="monitor" :size="24"><Monitor /></el-icon></div>
-        <dl v-if="config"><template v-for="(value, key) in config" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></template></dl>
-      </section>
+      </Transition>
     </main>
   </div>
 </template>

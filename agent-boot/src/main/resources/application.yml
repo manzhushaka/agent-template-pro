@@ -11,8 +11,13 @@ management:
       exposure:
         include: health,info
 agent:
+  routing:
+    mode: ${AGENT_ROUTING_MODE:coordinator}
   visitor:
     cookie-name: ${VISITOR_COOKIE_NAME:agent_visitor}
     signing-key: ${VISITOR_COOKIE_SIGNING_KEY:local-development-key-change-me}
   console:
-    access-key: ${CONSOLE_ACCESS_KEY:local-console-key}
+    username: "${CONSOLE_USERNAME:admin}"
+    password: "${CONSOLE_PASSWORD:Admin123!}"
+    captcha-ttl-seconds: ${CONSOLE_CAPTCHA_TTL_SECONDS:120}
+    session-ttl-seconds: ${CONSOLE_SESSION_TTL_SECONDS:1800}

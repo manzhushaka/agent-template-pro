@@ -45,6 +45,36 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+  <profiles>
+    <profile>
+      <id>runtime-jdbc</id>
+      <dependencies>
+        <!-- 仅持久化部署启用数据源、Flyway 与 MySQL 驱动；默认 Demo 无中间件即可运行。 -->
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+          <groupId>org.flywaydb</groupId>
+          <artifactId>flyway-mysql</artifactId>
+        </dependency>
+        <dependency>
+          <groupId>com.mysql</groupId>
+          <artifactId>mysql-connector-j</artifactId>
+          <scope>runtime</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>model-openai</id>
+      <dependencies>
+        <dependency>
+          <groupId>org.springframework.ai</groupId>
+          <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
   <build>
     <plugins>
       <!-- 将当前组装模块重新打包为可执行的 Spring Boot 应用。 -->

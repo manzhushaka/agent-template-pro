@@ -1,0 +1,11 @@
+spring:
+  config:
+    activate:
+      on-profile: model-minimax
+
+agent:
+  model:
+    minimax:
+      endpoint: ${MINIMAX_ANTHROPIC_BASE_URL:https://api.minimaxi.com/anthropic}
+      api-key: ${MINIMAX_API_KEY:}
+      model: ${MINIMAX_MODEL:minimax-m.2.7-highspeed}

@@ -43,7 +43,6 @@ function resizeComposer(): void {
 function scrollToLatest(): void {
   void nextTick(() => messageViewport.value?.scrollTo({
     top: messageViewport.value.scrollHeight,
-    behavior: 'smooth',
   }))
 }
 
@@ -101,7 +100,9 @@ watch(content, () => void nextTick(resizeComposer))
       @open-conversation="openConversation"
       @select-agent="(code) => { runtime.selectAgent(code); sidebarOpen = false }"
     />
-    <button v-if="sidebarOpen" class="sidebar-scrim" type="button" aria-label="关闭侧栏" @click="sidebarOpen = false" />
+    <Transition name="scrim">
+      <button v-if="sidebarOpen" class="sidebar-scrim" type="button" aria-label="关闭侧栏" @click="sidebarOpen = false" />
+    </Transition>
 
     <section class="chat-main">
       <ChatTopbar :bootstrap="runtime.bootstrap.value" :active-agent="runtime.activeAgent.value" @menu="sidebarOpen = true" />
@@ -155,7 +156,9 @@ watch(content, () => void nextTick(resizeComposer))
         </div>
       </div>
 
-      <div v-if="runtime.errorMessage.value" class="error-banner" role="alert"><span>{{ runtime.errorMessage.value }}</span><button type="button" aria-label="关闭错误提示" @click="runtime.errorMessage.value = ''"><X :size="14" /></button></div>
+      <Transition name="banner">
+        <div v-if="runtime.errorMessage.value" class="error-banner" role="alert"><span>{{ runtime.errorMessage.value }}</span><button type="button" aria-label="关闭错误提示" @click="runtime.errorMessage.value = ''"><X :size="14" /></button></div>
+      </Transition>
 
       <footer class="composer-wrap">
         <form class="composer" @submit.prevent="sendText(content)">
@@ -165,14 +168,16 @@ watch(content, () => void nextTick(resizeComposer))
         <p><LockKeyhole :size="12" />关键业务操作会在执行前请你确认</p>
       </footer>
 
-      <div v-if="runtime.confirm.value" class="confirm-layer" @mousedown.self="runtime.decide('REJECTED')">
-        <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-          <header><span><LockKeyhole :size="19" /></span><div><small>{{ runtime.confirm.value.agent?.name || '操作确认' }}</small><h2 id="confirm-title">{{ runtime.confirm.value.title }}</h2></div></header>
-          <p>请核对以下信息。确认后系统才会执行本次操作。</p>
-          <dl><template v-for="(value, key) in runtime.confirm.value.summary" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></template></dl>
-          <div class="dialog-actions"><button class="secondary" type="button" :disabled="runtime.loading.value" @click="runtime.decide('REJECTED')">取消</button><button class="primary" type="button" :disabled="runtime.loading.value" @click="runtime.decide('CONFIRMED')">确认执行</button></div>
-        </section>
-      </div>
+      <Transition name="dialog">
+        <div v-if="runtime.confirm.value" class="confirm-layer" @mousedown.self="runtime.decide('REJECTED')">
+          <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+            <header><span><LockKeyhole :size="19" /></span><div><small>{{ runtime.confirm.value.agent?.name || '操作确认' }}</small><h2 id="confirm-title">{{ runtime.confirm.value.title }}</h2></div></header>
+            <p>请核对以下信息。确认后系统才会执行本次操作。</p>
+            <dl><template v-for="(value, key) in runtime.confirm.value.summary" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></template></dl>
+            <div class="dialog-actions"><button class="secondary" type="button" :disabled="runtime.loading.value" @click="runtime.decide('REJECTED')">取消</button><button class="primary" type="button" :disabled="runtime.loading.value" @click="runtime.decide('CONFIRMED')">确认执行</button></div>
+          </section>
+        </div>
+      </Transition>
     </section>
   </main>
 </template>

@@ -22,6 +22,24 @@ reload_nginx() {
     "${nginx_bin}" -s reload -c "${nginx_conf}"
 }
 
+wait_for_routes() {
+    local chat_body console_body
+    for _ in $(seq 1 20); do
+        chat_body=$(curl --fail --silent --show-error --connect-timeout 1 --max-time 2 \
+            -H "Host: manzhushaka.cn" \
+            http://127.0.0.1:18090/gateway/agent-template-pro/chat/ 2>/dev/null || true)
+        console_body=$(curl --fail --silent --show-error --connect-timeout 1 --max-time 2 \
+            -H "Host: manzhushaka.cn" \
+            http://127.0.0.1:18090/gateway/agent-template-pro/console/ 2>/dev/null || true)
+        if [[ ${chat_body} == *'<title>Agent Pro -'* \
+            && ${console_body} == *'<title>Agent Console</title>'* ]]; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 restore_route() {
     install -o root -g root -m 0644 "${backup_file}" "${target_file}"
     reload_nginx
@@ -39,8 +57,8 @@ case "${mode}" in
             install -o root -g root -m 0644 "${target_file}" "${backup_file}"
         fi
         install -o root -g root -m 0644 "${source_file}" "${target_file}"
-        if ! reload_nginx; then
-            echo "New Nginx route is invalid; restoring the previous route." >&2
+        if ! reload_nginx || ! wait_for_routes; then
+            echo "New Nginx route did not become healthy; restoring the previous route." >&2
             restore_route
             exit 1
         fi

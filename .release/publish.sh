@@ -112,6 +112,12 @@ remote_preflight_started_at=${SECONDS}
   --ssh-config "${tmp_dir}/ssh_config" \
   --release-id "${release_id}"
 echo "Release metric: remote_preflight_seconds=$((SECONDS - remote_preflight_started_at))"
+previous_release=$(ssh -F "${tmp_dir}/ssh_config" release-home \
+  "basename \"\$(readlink -f /home/app/${PROJECT_NAME}/current)\"")
+if [[ ! ${previous_release} =~ ^v[0-9A-Za-z._-]+$ ]]; then
+  echo "Unable to identify the previous release." >&2
+  exit 1
+fi
 retry ssh -F "${tmp_dir}/ssh_config" release-home \
   "mkdir -p /home/codex-ops/incoming"
 upload_started_at=${SECONDS}
@@ -125,9 +131,25 @@ printf -v remote_command \
   "${PROJECT_NAME}" "${release_id}" "${remote_archive}" "${checksum}" "${HEALTHCHECK_URL}"
 retry ssh -F "${tmp_dir}/ssh_config" release-home "${remote_command}"
 
-if [[ -n ${PUBLIC_HEALTH_URL:-} ]]; then
-  retry curl --fail --silent --show-error --location \
-    --connect-timeout 5 --max-time 15 "${PUBLIC_HEALTH_URL}"
+route_activator="/home/app/${PROJECT_NAME}/releases/${release_id}/deploy/activate-nginx-route.sh"
+rollback_candidate() {
+  local failed=0
+  retry ssh -F "${tmp_dir}/ssh_config" release-home \
+    "sudo -n ${route_activator} rollback" || failed=1
+  retry ssh -F "${tmp_dir}/ssh_config" release-home \
+    "sudo -n /usr/local/sbin/personal-project-rollback ${PROJECT_NAME} ${previous_release}" || failed=1
+  return "${failed}"
+}
+
+if ! retry ssh -F "${tmp_dir}/ssh_config" release-home \
+  "sudo -n ${route_activator} apply"; then
+  rollback_candidate || echo "Automatic rollback requires operator attention." >&2
+  exit 1
+fi
+
+if ! "${release_dir}/verify-public.sh"; then
+  rollback_candidate || echo "Automatic rollback requires operator attention." >&2
+  exit 1
 fi
 
 echo "Release metric: deploy_total_seconds=$((SECONDS - publish_started_at))"

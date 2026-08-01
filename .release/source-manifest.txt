@@ -3,3 +3,4 @@
 # deployment files here so a missing source file fails before upload.
 # Example: deploy/example.locations.conf
 deploy/agent-template-pro.locations.conf
+deploy/activate-nginx-route.sh

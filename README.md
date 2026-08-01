@@ -60,7 +60,7 @@ SPRING_PROFILES_ACTIVE=dev,runtime-jdbc,model-minimax java -jar agent-boot/targe
 - Console：<https://manzhushaka.cn/gateway/agent-template-pro/console>
 - 健康检查：<https://manzhushaka.cn/gateway/agent-template-pro/health>
 
-首次接入或发布链路变更使用候选发布：同一份制品通过远程预检、原子部署和健康检查后才创建最终 Tag 与 GitHub Release。常规发布由新的 `v*` Tag 触发。发布脚本位于 `.release/`，Home Nginx 路由事实源为 `deploy/agent-template-pro.locations.conf`。
+首次接入或发布链路变更使用候选发布：同一份制品通过远程预检、原子部署和健康检查后才创建最终 Tag 与 GitHub Release。常规发布由新的 `v*` Tag 触发。发布脚本位于 `.release/`，Home Nginx 路由事实源为 `deploy/agent-template-pro.locations.conf`；候选部署会自动激活并校验该路由，公网 Chat、Console 和健康检查全部通过后才允许创建 Tag。
 
 ## 模块
 

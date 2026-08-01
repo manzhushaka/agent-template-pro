@@ -55,20 +55,6 @@ input {
   to { transform: rotate(360deg); }
 }
 
-.el-loading-spinner .circular {
-  display: none;
-}
-
-.el-loading-spinner::before {
-  width: 30px;
-  height: 30px;
-  display: inline-block;
-  border-radius: 4px;
-  background: url('/agent-pro-icon.png') center / cover no-repeat;
-  animation: icon-spin 900ms linear infinite;
-  content: "";
-}
-
 .eyebrow {
   margin: 0;
   color: var(--vh-primary-active);
@@ -241,7 +227,7 @@ input {
   border-left: 1px solid var(--vh-border);
 }
 
-.preview-metrics .app-icon {
+.preview-metrics .el-icon {
   margin-bottom: 14px;
   color: var(--vh-primary);
   font-size: 17px;
@@ -386,7 +372,7 @@ input {
   line-height: 1.55;
 }
 
-.security-note .app-icon {
+.security-note .el-icon {
   margin-top: 2px;
   flex: 0 0 auto;
 }
@@ -605,12 +591,6 @@ input {
   border-radius: 50%;
   background: var(--vh-surface-muted);
   color: var(--vh-dim);
-}
-
-.admin-avatar .app-icon {
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
 }
 
 .admin-copy strong,

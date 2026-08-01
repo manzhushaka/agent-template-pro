@@ -1,4 +1,23 @@
 <script setup lang="ts">
+import {
+  ArrowRight,
+  Coin,
+  Connection,
+  Cpu,
+  DataAnalysis,
+  Hide,
+  Key,
+  Lock,
+  Monitor,
+  Refresh,
+  Setting,
+  SwitchButton,
+  Tickets,
+  User,
+  UserFilled,
+  View,
+  WarningFilled,
+} from '@element-plus/icons-vue'
 import { computed, onMounted, ref } from 'vue'
 import AppIcon from './components/AppIcon.vue'
 
@@ -242,9 +261,9 @@ onMounted(() => {
             <span><i />READY</span>
           </header>
           <div class="preview-metrics">
-            <div><AppIcon :size="18" /><small>Runtime</small><strong>CODE-FIRST</strong></div>
-            <div><AppIcon :size="18" /><small>高风险动作</small><strong>二次确认</strong></div>
-            <div><AppIcon :size="18" /><small>当前存储</small><strong>IN-MEMORY</strong></div>
+            <div><el-icon :size="18"><Cpu /></el-icon><small>Runtime</small><strong>CODE-FIRST</strong></div>
+            <div><el-icon :size="18"><Lock /></el-icon><small>高风险动作</small><strong>二次确认</strong></div>
+            <div><el-icon :size="18"><Coin /></el-icon><small>当前存储</small><strong>IN-MEMORY</strong></div>
           </div>
           <div class="preview-list">
             <div><span>访客身份</span><b>签名 Cookie 隔离</b></div>
@@ -255,7 +274,7 @@ onMounted(() => {
       </div>
 
       <footer class="login-intro-footer">
-        <span><AppIcon :size="14" />管理端与匿名访客会话严格隔离</span>
+        <span><el-icon :size="14"><Lock /></el-icon>管理端与匿名访客会话严格隔离</span>
         <span>LOCAL DEMO</span>
       </footer>
     </section>
@@ -272,20 +291,22 @@ onMounted(() => {
           <p>使用管理员账号登录，图片验证码不区分大小写。</p>
         </header>
         <el-alert v-if="error" type="error" :closable="false">
-          <template #title><span class="alert-title"><AppIcon :size="16" />{{ error }}</span></template>
+          <template #title><span class="alert-title"><el-icon :size="16"><WarningFilled /></el-icon>{{ error }}</span></template>
         </el-alert>
         <div class="field-group">
           <label for="username">用户名</label>
           <el-input id="username" v-model="username" autocomplete="username" placeholder="请输入管理员用户名" :disabled="loading">
-            <template #prefix><AppIcon :size="17" /></template>
+            <template #prefix><el-icon :size="17"><User /></el-icon></template>
           </el-input>
         </div>
         <div class="field-group">
           <label for="password">密码</label>
           <el-input id="password" v-model="password" :type="passwordVisible ? 'text' : 'password'" autocomplete="current-password" placeholder="请输入管理员密码" :disabled="loading">
-            <template #prefix><AppIcon :size="17" /></template>
+            <template #prefix><el-icon :size="17"><Lock /></el-icon></template>
             <template #suffix>
-              <button class="password-toggle" type="button" :aria-label="passwordVisible ? '隐藏密码' : '显示密码'" @click="passwordVisible = !passwordVisible"><AppIcon :size="17" /></button>
+              <button class="password-toggle" type="button" :aria-label="passwordVisible ? '隐藏密码' : '显示密码'" @click="passwordVisible = !passwordVisible">
+                <el-icon :size="17"><Hide v-if="passwordVisible" /><View v-else /></el-icon>
+              </button>
             </template>
           </el-input>
         </div>
@@ -293,18 +314,18 @@ onMounted(() => {
           <label for="captcha-code">图片验证码</label>
           <div class="captcha-field">
             <el-input id="captcha-code" v-model="captchaCode" maxlength="4" autocomplete="off" placeholder="请输入验证码" :disabled="loading">
-              <template #prefix><AppIcon :size="17" /></template>
+              <template #prefix><el-icon :size="17"><Key /></el-icon></template>
             </el-input>
             <button class="captcha-image" type="button" aria-label="刷新图片验证码" :disabled="captchaLoading" @click="refreshCaptcha">
               <img v-if="captchaImage" :src="captchaImage" alt="图片验证码" width="132" height="44">
-              <AppIcon v-else class="captcha-placeholder" :size="18" />
+              <el-icon v-else class="captcha-placeholder" :class="{ spin: captchaLoading }" :size="18"><Refresh /></el-icon>
             </button>
           </div>
         </div>
         <el-button native-type="submit" type="primary" :disabled="loading || captchaLoading">
-          进入控制台 <AppIcon :class="{ spin: loading }" :size="16" />
+          进入控制台 <el-icon :class="{ spin: loading }" :size="16"><Refresh v-if="loading" /><ArrowRight v-else /></el-icon>
         </el-button>
-        <p class="security-note"><AppIcon :size="15" /><span>本地演示账号仅用于开发验证；部署环境必须替换默认密码并接入正式管理员权限体系。</span></p>
+        <p class="security-note"><el-icon :size="15"><Lock /></el-icon><span>本地演示账号仅用于开发验证；部署环境必须替换默认密码并接入正式管理员权限体系。</span></p>
       </form>
       <footer class="auth-footer"><span>Agent Template Pro</span><span>简体中文</span></footer>
     </section>
@@ -314,10 +335,10 @@ onMounted(() => {
     <aside class="sidebar">
       <div class="sidebar-brand"><span><AppIcon :size="36" /></span><b>Agent<br>Template</b></div>
       <nav>
-        <button :class="{ active: active === 'overview' }" @click="navigate('overview')"><AppIcon :size="17" /><span>运行总览</span></button>
-        <button :class="{ active: active === 'agents' }" @click="navigate('agents')"><AppIcon :size="17" /><span>领域 Agent</span></button>
-        <button :class="{ active: active === 'tasks' }" @click="navigate('tasks')"><AppIcon :size="17" /><span>任务记录</span></button>
-        <button :class="{ active: active === 'config' }" @click="navigate('config')"><AppIcon :size="17" /><span>运行配置</span></button>
+        <button :class="{ active: active === 'overview' }" @click="navigate('overview')"><el-icon :size="17"><DataAnalysis /></el-icon><span>运行总览</span></button>
+        <button :class="{ active: active === 'agents' }" @click="navigate('agents')"><el-icon :size="17"><Connection /></el-icon><span>领域 Agent</span></button>
+        <button :class="{ active: active === 'tasks' }" @click="navigate('tasks')"><el-icon :size="17"><Tickets /></el-icon><span>任务记录</span></button>
+        <button :class="{ active: active === 'config' }" @click="navigate('config')"><el-icon :size="17"><Setting /></el-icon><span>运行配置</span></button>
       </nav>
       <div class="sidebar-bottom"><span><i />本地演示环境</span></div>
     </aside>
@@ -327,11 +348,11 @@ onMounted(() => {
       <div class="top-header-actions">
         <span class="runtime-status"><i />服务运行中</span>
         <div class="admin-profile">
-          <span class="admin-avatar"><AppIcon :size="26" /></span>
+          <span class="admin-avatar"><el-icon :size="18"><UserFilled /></el-icon></span>
           <span class="admin-copy"><strong>{{ username }}</strong><small>系统管理员</small></span>
         </div>
         <el-tooltip content="退出登录" placement="bottom">
-          <el-button text circle aria-label="退出登录" @click="logout"><AppIcon :size="17" /></el-button>
+          <el-button text circle aria-label="退出登录" @click="logout"><el-icon :size="17"><SwitchButton /></el-icon></el-button>
         </el-tooltip>
       </div>
     </header>
@@ -340,7 +361,7 @@ onMounted(() => {
       <header class="workspace-header">
         <div><p class="eyebrow">AGENT RUNTIME / {{ active.toUpperCase() }}</p><h1>{{ title }}</h1></div>
         <div class="header-actions">
-          <el-button circle aria-label="刷新" :disabled="loading" @click="load"><AppIcon :class="{ spin: loading }" :size="17" /></el-button>
+          <el-button circle aria-label="刷新" :disabled="loading" @click="load"><el-icon :class="{ spin: loading }" :size="17"><Refresh /></el-icon></el-button>
           <el-button type="primary" @click="navigate('tasks')">查看任务</el-button>
         </div>
       </header>
@@ -383,7 +404,7 @@ onMounted(() => {
       </section>
 
       <section v-if="active === 'config'" class="config-section">
-        <div class="panel-header"><div><h2>非敏感运行配置</h2><p>密钥和值不会通过控制台 API 返回。</p></div><AppIcon class="monitor" :size="24" /></div>
+        <div class="panel-header"><div><h2>非敏感运行配置</h2><p>密钥和值不会通过控制台 API 返回。</p></div><el-icon class="monitor" :size="24"><Monitor /></el-icon></div>
         <dl v-if="config"><template v-for="(value, key) in config" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></template></dl>
       </section>
     </main>

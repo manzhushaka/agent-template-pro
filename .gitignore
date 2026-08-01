@@ -2,6 +2,12 @@ target/
 node_modules/
 dist/
 .env
+.codegraph/
+agent-boot/src/main/resources/application-dev.yml
 *.log
 .DS_Store
 .idea/
+
+# Personal project release build output
+.release/out/
+.release/work/

@@ -1,0 +1,10 @@
+spring:
+  config:
+    activate:
+      on-profile: runtime-jdbc
+  flyway:
+    enabled: true
+
+agent:
+  runtime:
+    store: jdbc

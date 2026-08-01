@@ -1,0 +1,136 @@
+name: Release personal project
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Final tag created only after this candidate deployment is healthy
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: production-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read release configuration
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .release/project.env
+          printf 'runtime=%s\n' "${RUNTIME}" >> "${GITHUB_OUTPUT}"
+          printf 'runtime_version=%s\n' "${RUNTIME_VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Java
+        if: steps.config.outputs.runtime == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ steps.config.outputs.runtime_version }}
+          cache: maven
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            ui-chat/package-lock.json
+            ui-console/package-lock.json
+
+      - name: Preflight release contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          started_at=${SECONDS}
+          .release/preflight.sh local
+          echo "Release metric: local_preflight_seconds=$((SECONDS - started_at))"
+
+      - name: Verify source
+        shell: bash
+        run: |
+          set -euo pipefail
+          started_at=${SECONDS}
+          .release/verify.sh
+          echo "Release metric: verify_seconds=$((SECONDS - started_at))"
+
+      - name: Package release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          started_at=${SECONDS}
+          .release/build.sh
+          .release/preflight.sh local --artifact .release/out/release.tar.gz
+          archive_bytes=$(wc -c < .release/out/release.tar.gz | tr -d '[:space:]')
+          echo "Release metric: package_seconds=$((SECONDS - started_at)) archive_bytes=${archive_bytes} dependency_layer=full-archive"
+
+      - name: Deploy through ECS and FRP
+        shell: bash
+        env:
+          DEPLOY_ECS_HOST: ${{ secrets.DEPLOY_ECS_HOST }}
+          DEPLOY_ECS_USER: ${{ secrets.DEPLOY_ECS_USER }}
+          DEPLOY_ECS_SSH_KEY: ${{ secrets.DEPLOY_ECS_SSH_KEY }}
+          DEPLOY_HOME_SSH_KEY: ${{ secrets.DEPLOY_HOME_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          RELEASE_ID: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+        run: .release/publish.sh "${RELEASE_ID}"
+
+      - name: Create final tag after candidate deployment
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          RELEASE_ID: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ ${RELEASE_ID} =~ ^v[0-9A-Za-z._-]+$ ]] || { echo "Invalid release tag: ${RELEASE_ID}" >&2; exit 1; }
+          git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_ID}" >/dev/null 2>&1 && {
+            echo "Release tag already exists: ${RELEASE_ID}" >&2
+            exit 1
+          }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${RELEASE_ID}" -m "Release ${RELEASE_ID}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${RELEASE_ID}"
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_ID}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_ID}" \
+              .release/out/release.tar.gz \
+              .release/out/release.tar.gz.sha256 \
+              .release/out/release-manifest.txt \
+              .release/out/release-manifest.txt.sha256 \
+              --clobber
+          else
+            gh release create "${RELEASE_ID}" \
+              .release/out/release.tar.gz \
+              .release/out/release.tar.gz.sha256 \
+              .release/out/release-manifest.txt \
+              .release/out/release-manifest.txt.sha256 \
+              --verify-tag \
+              --generate-notes \
+              --title "${RELEASE_ID}"
+          fi

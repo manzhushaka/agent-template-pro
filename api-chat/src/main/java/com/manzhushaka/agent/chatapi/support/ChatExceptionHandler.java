@@ -1,13 +1,40 @@
 package com.manzhushaka.agent.chatapi.support;
 
 import com.manzhushaka.agent.common.error.BusinessException;
-import org.springframework.http.*;
-import org.springframework.web.bind.annotation.*;
+import com.manzhushaka.agent.common.error.ErrorCode;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
 import java.util.Map;
+
 @RestControllerAdvice
 public class ChatExceptionHandler {
-    @ExceptionHandler(BusinessException.class) @ResponseStatus(HttpStatus.CONFLICT)
-    Map<String,Object> business(BusinessException ex) { return Map.of("code", ex.code().name(), "message", ex.getMessage(), "retryable", false); }
-    @ExceptionHandler(Exception.class) @ResponseStatus(HttpStatus.BAD_REQUEST)
-    Map<String,Object> invalid(Exception ex) { return Map.of("code", "VALIDATION_FAILED", "message", "请求无效", "retryable", false); }
+    @ExceptionHandler(BusinessException.class)
+    ResponseEntity<Map<String, Object>> business(BusinessException exception) {
+        return ResponseEntity.status(status(exception.code())).body(Map.of(
+                "code", exception.code().name(),
+                "message", exception.getMessage(),
+                "retryable", false
+        ));
+    }
+
+    @ExceptionHandler(Exception.class)
+    ResponseEntity<Map<String, Object>> invalid() {
+        return ResponseEntity.badRequest().body(Map.of(
+                "code", "VALIDATION_FAILED",
+                "message", "请求无效",
+                "retryable", false
+        ));
+    }
+
+    private HttpStatus status(ErrorCode code) {
+        return switch (code) {
+            case RESOURCE_NOT_FOUND, AGENT_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case CONVERSATION_FORBIDDEN -> HttpStatus.FORBIDDEN;
+            case VALIDATION_FAILED, AGENT_ACTION_OWNERSHIP_INVALID -> HttpStatus.UNPROCESSABLE_ENTITY;
+            default -> HttpStatus.CONFLICT;
+        };
+    }
 }

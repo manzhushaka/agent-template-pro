@@ -20,7 +20,6 @@ defineProps<{
   bootstrap: Bootstrap | null
   conversations: Conversation[]
   activeId: string
-  open: boolean
   creating: boolean
   loading: boolean
 }>()
@@ -58,7 +57,7 @@ function conversationDate(value: string): string {
 </script>
 
 <template>
-  <aside :class="['conversation-rail', { open }]">
+  <aside class="conversation-rail">
     <div class="brand">
       <span class="brand-mark"><AppIcon :size="32" /></span>
       <span><strong>Agent Pro</strong><small>{{ bootstrap?.coordinator.displayName || 'GROUP ASSISTANT' }}</small></span>

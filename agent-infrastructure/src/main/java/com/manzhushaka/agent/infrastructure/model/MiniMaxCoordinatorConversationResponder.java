@@ -7,12 +7,15 @@ import com.manzhushaka.agent.runtime.chat.CoordinatorConversationRequest;
 import com.manzhushaka.agent.runtime.chat.CoordinatorConversationResponder;
 import com.manzhushaka.agent.runtime.chat.CoordinatorPromptBuilder;
 import com.manzhushaka.agent.runtime.chat.PresetCoordinatorConversationResponder;
+import com.manzhushaka.agent.runtime.store.SpanStatus;
+import com.manzhushaka.agent.runtime.trace.TraceRecorder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -33,19 +36,22 @@ public class MiniMaxCoordinatorConversationResponder implements CoordinatorConve
     private final ObjectMapper objectMapper;
     private final PresetCoordinatorConversationResponder fallback;
     private final HttpClient httpClient;
+    private final TraceRecorder traceRecorder;
 
     public MiniMaxCoordinatorConversationResponder(
             @Value("${agent.model.minimax.endpoint:https://api.minimaxi.com/anthropic}") String endpoint,
             @Value("${agent.model.minimax.api-key:}") String apiKey,
             @Value("${agent.model.minimax.model:minimax-m.2.7-highspeed}") String model,
             ObjectMapper objectMapper,
-            PresetCoordinatorConversationResponder fallback
+            PresetCoordinatorConversationResponder fallback,
+            TraceRecorder traceRecorder
     ) {
         this.messagesUri = URI.create(messagesEndpoint(endpoint));
         this.apiKey = apiKey;
         this.model = model;
         this.objectMapper = objectMapper;
         this.fallback = fallback;
+        this.traceRecorder = traceRecorder;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
@@ -56,15 +62,32 @@ public class MiniMaxCoordinatorConversationResponder implements CoordinatorConve
         if (apiKey.isBlank()) {
             return fallback.respond(request);
         }
+        Instant startedAt = Instant.now();
         try {
             String content = callModel(request);
             if (content.isBlank()) {
+                recordModel(request, startedAt, SpanStatus.ERROR, "MODEL_EMPTY_RESPONSE");
                 return fallback.respond(request);
             }
+            recordModel(request, startedAt, SpanStatus.OK, null);
             return new CoordinatorConversationReply(content.trim(), CoordinatorConversationReply.MODEL);
         } catch (Exception exception) {
+            recordModel(request, startedAt, SpanStatus.ERROR, "MODEL_CALL_FAILED");
             return fallback.respond(request);
         }
+    }
+
+    private void recordModel(
+            CoordinatorConversationRequest request,
+            Instant startedAt,
+            SpanStatus status,
+            String errorCode
+    ) {
+        traceRecorder.recordModel(
+                request.traceId() == null ? request.requestId() : request.traceId(),
+                request.visitorId(), request.conversationId(), request.requestId(),
+                "minimax", model, 0, 0, status, errorCode, startedAt, Instant.now()
+        );
     }
 
     private String callModel(CoordinatorConversationRequest request) throws IOException, InterruptedException {

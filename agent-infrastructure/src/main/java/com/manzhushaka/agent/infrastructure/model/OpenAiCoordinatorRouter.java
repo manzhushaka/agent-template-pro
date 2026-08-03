@@ -8,7 +8,10 @@ import com.manzhushaka.agent.runtime.routing.DeterministicCoordinatorRouter;
 import com.manzhushaka.agent.runtime.routing.RouteDecision;
 import com.manzhushaka.agent.runtime.routing.RouteSource;
 import com.manzhushaka.agent.runtime.routing.RouteType;
+import com.manzhushaka.agent.runtime.store.SpanStatus;
+import com.manzhushaka.agent.runtime.trace.TraceRecorder;
 import com.manzhushaka.agent.spi.domain.DomainAgentDescriptor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -19,6 +22,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.time.Instant;
 import java.util.stream.Collectors;
 
 @Service
@@ -31,15 +35,21 @@ public class OpenAiCoordinatorRouter implements CoordinatorRouter {
     private final ChatModel chatModel;
     private final ObjectMapper objectMapper;
     private final DeterministicCoordinatorRouter fallback;
+    private final TraceRecorder traceRecorder;
+    private final String model;
 
     public OpenAiCoordinatorRouter(
             ChatModel chatModel,
             ObjectMapper objectMapper,
-            DeterministicCoordinatorRouter fallback
+            DeterministicCoordinatorRouter fallback,
+            TraceRecorder traceRecorder,
+            @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}") String model
     ) {
         this.chatModel = chatModel;
         this.objectMapper = objectMapper;
         this.fallback = fallback;
+        this.traceRecorder = traceRecorder;
+        this.model = model;
     }
 
     @Override
@@ -48,9 +58,11 @@ public class OpenAiCoordinatorRouter implements CoordinatorRouter {
             ConversationRoutingContext context,
             List<DomainAgentDescriptor> candidates
     ) {
+        Instant startedAt = Instant.now();
         try {
             String response = chatModel.call(new Prompt(new UserMessage(prompt(content, context, candidates))))
                     .getResult().getOutput().getText();
+            recordModel(context, startedAt, SpanStatus.OK, null);
             Map<String, Object> decision = objectMapper.readValue(response, MAP_TYPE);
             String target = optionalTarget(decision.get("agentCode"));
             if (target == null) {
@@ -78,8 +90,21 @@ public class OpenAiCoordinatorRouter implements CoordinatorRouter {
                     List.of()
             );
         } catch (Exception exception) {
+            recordModel(context, startedAt, SpanStatus.ERROR, "MODEL_CALL_FAILED");
             return fallback.route(content, context, candidates);
         }
+    }
+
+    private void recordModel(
+            ConversationRoutingContext context,
+            Instant startedAt,
+            SpanStatus status,
+            String errorCode
+    ) {
+        traceRecorder.recordModel(
+                context.requestId(), context.visitorId(), context.conversationId(), context.requestId(),
+                "openai", model, 0, 0, status, errorCode, startedAt, Instant.now()
+        );
     }
 
     private String prompt(

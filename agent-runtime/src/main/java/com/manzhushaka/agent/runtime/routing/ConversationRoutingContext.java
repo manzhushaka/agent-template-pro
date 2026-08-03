@@ -4,6 +4,8 @@ public record ConversationRoutingContext(
         String conversationId,
         String currentAgentCode,
         long routingVersion,
-        boolean writeOperationPending
+        boolean writeOperationPending,
+        String visitorId,
+        String requestId
 ) {
 }

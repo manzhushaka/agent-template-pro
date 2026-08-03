@@ -3,6 +3,23 @@ server:
 spring:
   application:
     name: agent-template-pro
+  codec:
+    # Console document JSON uploads carry at most 10 MiB source bytes, or 13,981,016 Base64 chars.
+    max-in-memory-size: 15MB
+  ai:
+    dashscope:
+      agent:
+        enabled: false
+    model:
+      chat: none
+      embedding: none
+      image: none
+      video: none
+      rerank: none
+      audio:
+        transcription: none
+        speech: none
+      moderation: none
   main:
     web-application-type: reactive
 management:
@@ -13,6 +30,24 @@ management:
 agent:
   routing:
     mode: ${AGENT_ROUTING_MODE:coordinator}
+  recovery:
+    enabled: ${AGENT_RECOVERY_ENABLED:false}
+    initial-delay: ${AGENT_RECOVERY_INITIAL_DELAY:PT30S}
+    fixed-delay: ${AGENT_RECOVERY_FIXED_DELAY:PT1M}
+    limit: ${AGENT_RECOVERY_LIMIT:50}
+  model:
+    active-code: ${AGENT_MODEL_ACTIVE_CODE:}
+  knowledge:
+    storage-directory: ${AGENT_KNOWLEDGE_STORAGE_DIRECTORY:./data/knowledge}
+    index-fixed-delay: ${AGENT_KNOWLEDGE_INDEX_FIXED_DELAY:PT30S}
+    s3:
+      endpoint: ${AGENT_KNOWLEDGE_S3_ENDPOINT:}
+      allowed-hosts: ${AGENT_KNOWLEDGE_S3_ALLOWED_HOSTS:}
+      bucket: ${AGENT_KNOWLEDGE_S3_BUCKET:}
+      region: ${AGENT_KNOWLEDGE_S3_REGION:}
+      access-key-id: ${AGENT_KNOWLEDGE_S3_ACCESS_KEY_ID:}
+      secret-access-key: ${AGENT_KNOWLEDGE_S3_SECRET_ACCESS_KEY:}
+      timeout: ${AGENT_KNOWLEDGE_S3_TIMEOUT:PT10S}
   visitor:
     cookie-name: ${VISITOR_COOKIE_NAME:agent_visitor}
     signing-key: ${VISITOR_COOKIE_SIGNING_KEY:local-development-key-change-me}
@@ -21,3 +56,9 @@ agent:
     password: "${CONSOLE_PASSWORD:Admin123!}"
     captcha-ttl-seconds: ${CONSOLE_CAPTCHA_TTL_SECONDS:120}
     session-ttl-seconds: ${CONSOLE_SESSION_TTL_SECONDS:1800}
+    provider-allowed-hosts: "${CONSOLE_PROVIDER_ALLOWED_HOSTS:api.openai.com,api.minimax.chat,api.deepseek.com}"
+    provider-test-timeout: ${CONSOLE_PROVIDER_TEST_TIMEOUT:PT5S}
+    mcp-allowed-hosts: "${CONSOLE_MCP_ALLOWED_HOSTS:}"
+    mcp-allowed-stdio-commands: "${CONSOLE_MCP_ALLOWED_STDIO_COMMANDS:}"
+    mcp-stdio-enabled: ${CONSOLE_MCP_STDIO_ENABLED:false}
+    mcp-timeout: ${CONSOLE_MCP_TIMEOUT:PT5S}

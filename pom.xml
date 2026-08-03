@@ -22,7 +22,9 @@
     <module>agent-domain-spi</module>
     <module>agent-runtime</module>
     <module>agent-infrastructure</module>
+    <module>agent-control-plane</module>
     <module>api-chat</module>
+    <module>api-agent</module>
     <module>api-console</module>
     <module>agent-demo</module>
     <module>agent-boot</module>
@@ -32,6 +34,8 @@
     <java.version>21</java.version>
     <maven.compiler.release>21</maven.compiler.release>
     <spring-ai.version>1.1.2</spring-ai.version>
+    <spring-ai-alibaba.version>1.1.2.2</spring-ai-alibaba.version>
+    <jetbrains-annotations.version>24.0.1</jetbrains-annotations.version>
   </properties>
   <!-- 导入 Spring AI BOM，子模块可直接使用其受管版本。 -->
   <dependencyManagement>
@@ -42,6 +46,25 @@
         <version>${spring-ai.version}</version>
         <type>pom</type>
         <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.alibaba.cloud.ai</groupId>
+        <artifactId>spring-ai-alibaba-bom</artifactId>
+        <version>${spring-ai-alibaba.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.alibaba.cloud.ai</groupId>
+        <artifactId>spring-ai-alibaba-extensions-bom</artifactId>
+        <version>${spring-ai-alibaba.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.jetbrains</groupId>
+        <artifactId>annotations</artifactId>
+        <version>${jetbrains-annotations.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

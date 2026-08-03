@@ -1,0 +1,17 @@
+spring:
+  config:
+    activate:
+      on-profile: model-dashscope
+  ai:
+    model:
+      chat: ${AGENT_CHAT_MODEL_PROVIDER:none}
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:}
+      chat:
+        options:
+          model: ${DASHSCOPE_CHAT_MODEL:qwen-plus}
+          temperature: 0
+
+agent:
+  model:
+    resolver: dashscope

@@ -9,6 +9,8 @@ import com.manzhushaka.agent.runtime.routing.DeterministicCoordinatorRouter;
 import com.manzhushaka.agent.runtime.routing.RouteDecision;
 import com.manzhushaka.agent.runtime.routing.RouteSource;
 import com.manzhushaka.agent.runtime.routing.RouteType;
+import com.manzhushaka.agent.runtime.store.SpanStatus;
+import com.manzhushaka.agent.runtime.trace.TraceRecorder;
 import com.manzhushaka.agent.spi.domain.DomainAgentDescriptor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
@@ -20,6 +22,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -36,13 +39,15 @@ public class MiniMaxCoordinatorRouter implements CoordinatorRouter {
     private final ObjectMapper objectMapper;
     private final DeterministicCoordinatorRouter fallback;
     private final HttpClient httpClient;
+    private final TraceRecorder traceRecorder;
 
     public MiniMaxCoordinatorRouter(
             @Value("${agent.model.minimax.endpoint:https://api.minimaxi.com/anthropic}") String endpoint,
             @Value("${agent.model.minimax.api-key:}") String apiKey,
             @Value("${agent.model.minimax.model:minimax-m.2.7-highspeed}") String model,
             ObjectMapper objectMapper,
-            DeterministicCoordinatorRouter fallback
+            DeterministicCoordinatorRouter fallback,
+            TraceRecorder traceRecorder
     ) {
         String normalized = endpoint.endsWith("/") ? endpoint.substring(0, endpoint.length() - 1) : endpoint;
         this.messagesUri = URI.create(normalized.endsWith("/v1/messages")
@@ -52,6 +57,7 @@ public class MiniMaxCoordinatorRouter implements CoordinatorRouter {
         this.model = model;
         this.objectMapper = objectMapper;
         this.fallback = fallback;
+        this.traceRecorder = traceRecorder;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
@@ -64,6 +70,7 @@ public class MiniMaxCoordinatorRouter implements CoordinatorRouter {
         if (apiKey.isBlank()) {
             return fallback.route(content, context, candidates);
         }
+        Instant startedAt = Instant.now();
         try {
             String agents = candidates.stream()
                     .map(candidate -> candidate.code() + ": " + candidate.routingDescription())
@@ -84,6 +91,7 @@ public class MiniMaxCoordinatorRouter implements CoordinatorRouter {
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                recordModel(context, startedAt, SpanStatus.ERROR, "MODEL_HTTP_ERROR");
                 return fallback.route(content, context, candidates);
             }
             JsonNode blocks = objectMapper.readTree(response.body()).path("content");
@@ -94,6 +102,7 @@ public class MiniMaxCoordinatorRouter implements CoordinatorRouter {
                 text = text.substring(text.indexOf('\n') + 1, text.lastIndexOf("```"));
             }
             Map<String, Object> decision = objectMapper.readValue(text.trim(), MAP_TYPE);
+            recordModel(context, startedAt, SpanStatus.OK, null);
             String target = optionalTarget(decision.get("agentCode"));
             if (target == null) {
                 return new RouteDecision(
@@ -116,8 +125,21 @@ public class MiniMaxCoordinatorRouter implements CoordinatorRouter {
                     target, confidence, RouteSource.MODEL, "MODEL_DOMAIN_SELECTED", List.of()
             );
         } catch (Exception exception) {
+            recordModel(context, startedAt, SpanStatus.ERROR, "MODEL_CALL_FAILED");
             return fallback.route(content, context, candidates);
         }
+    }
+
+    private void recordModel(
+            ConversationRoutingContext context,
+            Instant startedAt,
+            SpanStatus status,
+            String errorCode
+    ) {
+        traceRecorder.recordModel(
+                context.requestId(), context.visitorId(), context.conversationId(), context.requestId(),
+                "minimax", model, 0, 0, status, errorCode, startedAt, Instant.now()
+        );
     }
 
     private String optionalTarget(Object value) {

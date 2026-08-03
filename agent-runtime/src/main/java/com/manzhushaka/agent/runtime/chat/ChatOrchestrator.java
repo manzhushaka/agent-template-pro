@@ -8,33 +8,39 @@ import com.manzhushaka.agent.runtime.agent.RegisteredDomainAgent;
 import com.manzhushaka.agent.runtime.event.StreamEvent;
 import com.manzhushaka.agent.runtime.intent.IntentDecision;
 import com.manzhushaka.agent.runtime.intent.IntentResolver;
+import com.manzhushaka.agent.runtime.model.ModelActionSelectionPolicy;
 import com.manzhushaka.agent.runtime.routing.ConversationRoutingContext;
 import com.manzhushaka.agent.runtime.routing.CoordinatorRouter;
 import com.manzhushaka.agent.runtime.routing.RouteDecision;
 import com.manzhushaka.agent.runtime.routing.RouteSource;
 import com.manzhushaka.agent.runtime.routing.RouteType;
 import com.manzhushaka.agent.runtime.store.MessageAppend;
+import com.manzhushaka.agent.runtime.store.AuditRecord;
 import com.manzhushaka.agent.runtime.store.RouteDecisionRecord;
 import com.manzhushaka.agent.runtime.store.RouteMetrics;
 import com.manzhushaka.agent.runtime.store.RuntimeStore;
+import com.manzhushaka.agent.runtime.store.SpanStatus;
 import com.manzhushaka.agent.runtime.store.TimelineItem;
+import com.manzhushaka.agent.runtime.store.ToolExecutionRecord;
+import com.manzhushaka.agent.runtime.store.ToolExecutionStatus;
 import com.manzhushaka.agent.runtime.task.AgentTask;
+import com.manzhushaka.agent.runtime.task.ConfirmationDecision;
+import com.manzhushaka.agent.runtime.task.ConfirmationSnapshotHasher;
 import com.manzhushaka.agent.runtime.task.TaskStatus;
+import com.manzhushaka.agent.runtime.task.TaskTransition;
+import com.manzhushaka.agent.runtime.trace.TraceRecorder;
 import com.manzhushaka.agent.spi.action.ActionMode;
 import com.manzhushaka.agent.spi.action.AgentAction;
+import com.manzhushaka.agent.spi.action.ActionDescriptor;
 import com.manzhushaka.agent.spi.context.ActionContext;
 import com.manzhushaka.agent.spi.domain.DomainAgentDescriptor;
 import com.manzhushaka.agent.spi.result.ActionResult;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,7 +59,10 @@ public class ChatOrchestrator {
     private final IntentResolver intentResolver;
     private final CoordinatorRouter coordinatorRouter;
     private final CoordinatorConversationResponder coordinatorConversationResponder;
+    private final ConfirmationSnapshotHasher confirmationSnapshotHasher;
+    private final ModelActionSelectionPolicy modelActionSelectionPolicy;
     private final String routingMode;
+    private final TraceRecorder traceRecorder;
 
     public ChatOrchestrator(
             RuntimeStore store,
@@ -61,6 +70,8 @@ public class ChatOrchestrator {
             List<IntentResolver> intentResolvers,
             List<CoordinatorRouter> coordinatorRouters,
             List<CoordinatorConversationResponder> coordinatorConversationResponders,
+            ConfirmationSnapshotHasher confirmationSnapshotHasher,
+            TraceRecorder traceRecorder,
             @Value("${agent.routing.mode:coordinator}") String routingMode
     ) {
         this.store = store;
@@ -68,7 +79,10 @@ public class ChatOrchestrator {
         this.intentResolver = intentResolvers.getFirst();
         this.coordinatorRouter = coordinatorRouters.getFirst();
         this.coordinatorConversationResponder = coordinatorConversationResponders.getFirst();
+        this.confirmationSnapshotHasher = confirmationSnapshotHasher;
+        this.modelActionSelectionPolicy = new ModelActionSelectionPolicy();
         this.routingMode = routingMode;
+        this.traceRecorder = traceRecorder;
     }
 
     public Conversation createConversation(String visitorId) {
@@ -117,18 +131,60 @@ public class ChatOrchestrator {
             String content,
             String requestId
     ) {
+        return message(visitorId, conversationId, content, requestId, null);
+    }
+
+    /**
+     * Runs a user message through the same Runtime chain with an optional published Agent
+     * application context. The app context only shapes the coordinator reply; routing,
+     * confirmation gates, idempotency and audits stay on the shared chain.
+     */
+    public List<StreamEvent> message(
+            String visitorId,
+            String conversationId,
+            String content,
+            String requestId,
+            AgentAppRuntimeContext appContext
+    ) {
+        Instant startedAt = Instant.now();
         Conversation conversation = requireConversation(visitorId, conversationId);
         store.appendMessage(new MessageAppend(conversationId, "USER", content, "message.final", null, null));
 
-        if ("flat".equalsIgnoreCase(routingMode)) {
-            return flatRoute(visitorId, conversation, content, requestId);
+        try {
+            String agentCode;
+            List<StreamEvent> events;
+            if ("flat".equalsIgnoreCase(routingMode)) {
+                events = flatRoute(visitorId, conversation, content, requestId);
+                agentCode = null;
+            } else {
+                RouteDecision decision = coordinatorRouter.route(
+                        content,
+                        routingContext(visitorId, conversation, requestId),
+                        publicDescriptors()
+                );
+                agentCode = decision.targetAgentCode();
+                events = handleRoute(visitorId, conversation, content, requestId, decision, appContext);
+            }
+            traceRecorder.recordRequest(
+                    traceRecorder.traceIdFor(requestId), visitorId, conversationId, requestId,
+                    agentCode, startedAt, Instant.now(), SpanStatus.OK, null, resourceVersions(appContext)
+            );
+            return events;
+        } catch (BusinessException exception) {
+            traceRecorder.recordRequest(
+                    traceRecorder.traceIdFor(requestId), visitorId, conversationId, requestId,
+                    null, startedAt, Instant.now(), SpanStatus.ERROR, exception.code().name(),
+                    resourceVersions(appContext)
+            );
+            throw exception;
+        } catch (RuntimeException exception) {
+            traceRecorder.recordRequest(
+                    traceRecorder.traceIdFor(requestId), visitorId, conversationId, requestId,
+                    null, startedAt, Instant.now(), SpanStatus.ERROR, "INTERNAL_ERROR",
+                    resourceVersions(appContext)
+            );
+            throw exception;
         }
-        RouteDecision decision = coordinatorRouter.route(
-                content,
-                routingContext(visitorId, conversation),
-                publicDescriptors()
-        );
-        return handleRoute(visitorId, conversation, content, requestId, decision);
     }
 
     public List<StreamEvent> selectAgent(
@@ -173,6 +229,29 @@ public class ChatOrchestrator {
         return collectOrRun(visitorId, pending.conversationId(), requestId, owned, pending.input(), pending);
     }
 
+    /**
+     * Deterministic workflow entry point: resolves a registered domain action by code and runs the
+     * same collect-or-run gate as chat (required fields, QUERY/DRAFT direct, write modes create a
+     * confirmation task). Used by Workflow ACTION nodes so no second execution chain exists.
+     */
+    public List<StreamEvent> executeWorkflowAction(
+            String visitorId,
+            String conversationId,
+            String requestId,
+            String agentCode,
+            String actionCode,
+            Map<String, Object> input
+    ) {
+        OwnedAction owned = ownedAction(actionCode);
+        assertOwnership(agentCode, owned);
+        return collectOrRun(visitorId, conversationId, requestId, owned, input == null ? Map.of() : input, null);
+    }
+
+    /** Executes a confirmation-dispatched domain action; only used by the workflow gate path. */
+    public List<StreamEvent> executeDispatchedWorkflowTask(AgentTask dispatched, String requestId) {
+        return executeTask(dispatched, requestId);
+    }
+
     public List<StreamEvent> confirm(
             String visitorId,
             String taskId,
@@ -183,26 +262,43 @@ public class ChatOrchestrator {
         AgentTask task = store.findTask(visitorId, taskId).orElseThrow(
                 () -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在或不属于当前访客")
         );
-        if ("CONFIRMED".equals(decision)) {
-            return executeTask(task, confirmationVersion, requestId);
-        }
-        AgentTask cancelled = store.transitionTask(
+        ConfirmationDecision confirmationDecision = switch (decision) {
+            case "CONFIRMED" -> ConfirmationDecision.CONFIRMED;
+            case "REJECTED" -> ConfirmationDecision.REJECTED;
+            default -> throw new BusinessException(ErrorCode.VALIDATION_FAILED, "确认决定不受支持");
+        };
+        Instant now = Instant.now();
+        AgentTask decided = store.decideConfirmation(
                 visitorId,
                 taskId,
-                TaskStatus.WAITING_CONFIRMATION,
                 confirmationVersion,
-                TaskStatus.CANCELLED,
-                null
+                task.version(),
+                task.confirmationSnapshotHash(),
+                confirmationDecision,
+                requestId,
+                now,
+                confirmationDecision == ConfirmationDecision.CONFIRMED ? now.plusSeconds(30) : null
         ).orElseThrow(this::confirmationConflict);
-        store.audit(visitorId, taskId, "TASK_CANCELLED");
-        RegisteredDomainAgent agent = agent(cancelled.domainCode());
+        audit(visitorId, taskId, requestId, "TASK_" + confirmationDecision.name(), Map.of(
+                "confirmationVersion", confirmationVersion
+        ));
+        traceRecorder.recordTask(
+                traceRecorder.traceIdFor(requestId), visitorId, decided, SpanStatus.OK,
+                "task.confirm", Map.of("decision", confirmationDecision.name(),
+                        "confirmationVersion", confirmationVersion),
+                Instant.now()
+        );
+        if (confirmationDecision == ConfirmationDecision.CONFIRMED) {
+            return executeTask(decided, requestId);
+        }
+        RegisteredDomainAgent agent = agent(decided.domainCode());
         return List.of(systemEvent(
                 "task.status",
-                cancelled.conversationId(),
+                decided.conversationId(),
                 requestId,
                 agent,
-                cancelled.actionCode(),
-                Map.of("taskId", taskId, "status", cancelled.status().name())
+                decided.actionCode(),
+                Map.of("taskId", taskId, "status", decided.status().name())
         ));
     }
 
@@ -218,14 +314,12 @@ public class ChatOrchestrator {
             String content,
             String requestId
     ) {
-        IntentDecision intent = intentResolver.resolve(
-                content,
-                registry.enabledAgents().stream()
-                        .flatMap(agent -> agent.actions().values().stream())
-                        .map(AgentAction::descriptor)
-                        .toList()
-        );
-        OwnedAction owned = ownedAction(intent.actionCode());
+        List<ActionDescriptor> allowedActions = registry.enabledAgents().stream()
+                .flatMap(agent -> agent.actions().values().stream())
+                .map(AgentAction::descriptor)
+                .toList();
+        IntentDecision intent = intentResolver.resolve(content, allowedActions);
+        OwnedAction owned = selectedOwnedAction(intent.actionCode(), allowedActions);
         RouteDecision route = new RouteDecision(
                 owned.agentCode().equals(conversation.activeAgentCode())
                         ? RouteType.KEEP_CURRENT_AGENT
@@ -246,13 +340,24 @@ public class ChatOrchestrator {
             String requestId,
             RouteDecision decision
     ) {
+        return handleRoute(visitorId, conversation, content, requestId, decision, null);
+    }
+
+    private List<StreamEvent> handleRoute(
+            String visitorId,
+            Conversation conversation,
+            String content,
+            String requestId,
+            RouteDecision decision,
+            AgentAppRuntimeContext appContext
+    ) {
         if (decision.type() == RouteType.GENERAL_ASSISTANCE) {
             saveRoute(visitorId, conversation, requestId, decision);
-            return List.of(coordinatorConversationMessage(visitorId, conversation, requestId, content, decision));
+            return List.of(coordinatorConversationMessage(visitorId, conversation, requestId, content, decision, appContext));
         }
         if (decision.type() == RouteType.CLARIFICATION_REQUIRED) {
             saveRoute(visitorId, conversation, requestId, decision);
-            return List.of(coordinatorConversationMessage(visitorId, conversation, requestId, content, decision));
+            return List.of(coordinatorConversationMessage(visitorId, conversation, requestId, content, decision, appContext));
         }
         if (decision.type() == RouteType.UNSUPPORTED || decision.targetAgentCode() == null) {
             saveRoute(visitorId, conversation, requestId, decision);
@@ -263,11 +368,11 @@ public class ChatOrchestrator {
         }
 
         RegisteredDomainAgent target = visibleAgent(decision.targetAgentCode());
-        IntentDecision intent = intentResolver.resolve(
-                content,
-                target.actions().values().stream().map(AgentAction::descriptor).toList()
-        );
-        OwnedAction owned = ownedAction(intent.actionCode());
+        List<ActionDescriptor> allowedActions = target.actions().values().stream()
+                .map(AgentAction::descriptor)
+                .toList();
+        IntentDecision intent = intentResolver.resolve(content, allowedActions);
+        OwnedAction owned = selectedOwnedAction(intent.actionCode(), allowedActions);
         assertOwnership(target.descriptor().code(), owned);
         return runRouted(visitorId, conversation, requestId, decision, owned, intent.input());
     }
@@ -311,6 +416,11 @@ public class ChatOrchestrator {
         List<String> missing = action.descriptor().requiredFields().stream()
                 .filter(field -> !input.containsKey(field) || String.valueOf(input.get(field)).isBlank())
                 .toList();
+        traceRecorder.recordAction(
+                traceRecorder.traceIdFor(requestId), visitorId, conversationId, requestId,
+                agent.descriptor().code(), action.descriptor().code(),
+                action.descriptor().mode().name(), missing.size(), Instant.now()
+        );
         if (!missing.isEmpty()) {
             PendingAction pending = existing == null
                     ? store.savePending(new PendingAction(
@@ -357,7 +467,11 @@ public class ChatOrchestrator {
                 requestId,
                 input
         );
-        candidate.prepareConfirmation(1, confirmationHash(action.descriptor().code(), input));
+        candidate.prepareConfirmation(
+                1,
+                confirmationSnapshotHasher.hash(action.descriptor().code(), input),
+                Instant.now().plus(15, ChronoUnit.MINUTES)
+        );
         AgentTask task = store.saveTask(candidate);
         if (!task.visitorId().equals(visitorId)) {
             throw new BusinessException(ErrorCode.REQUEST_DUPLICATED, "请求标识已被占用，请重新发起操作");
@@ -376,7 +490,17 @@ public class ChatOrchestrator {
                     )
             ));
         }
-        store.audit(visitorId, task.id(), "WAITING_CONFIRMATION");
+        traceRecorder.recordTask(
+                traceRecorder.traceIdFor(requestId), visitorId, task, SpanStatus.OK,
+                "task.confirmation", Map.of(
+                        "confirmationRequired", true,
+                        "confirmationVersion", task.confirmationVersion(),
+                        "status", task.status().name()
+                ), Instant.now()
+        );
+        audit(visitorId, task.id(), requestId, "WAITING_CONFIRMATION", Map.of(
+                "confirmationVersion", task.confirmationVersion()
+        ));
         return List.of(systemEvent(
                 "action.confirm",
                 conversationId,
@@ -386,6 +510,7 @@ public class ChatOrchestrator {
                 Map.of(
                         "taskId", task.id(),
                         "confirmationVersion", task.confirmationVersion(),
+                        "expiresAt", task.confirmationExpiresAt().toString(),
                         "title", action.descriptor().confirmationTitle(),
                         "summary", task.input()
                 )
@@ -401,9 +526,21 @@ public class ChatOrchestrator {
     ) {
         AgentAction action = owned.action();
         RegisteredDomainAgent agent = agent(owned.agentCode());
-        ActionResult result = action.execute(
-                new ActionContext(visitorId, conversationId, requestId, requestId), input
-        );
+        ToolExecutionRecord execution = startedExecution(null, conversationId, action.descriptor().code(), requestId, input);
+        store.saveToolExecution(execution);
+        String traceId = traceRecorder.traceIdFor(requestId);
+        ActionResult result;
+        try {
+            result = action.execute(new ActionContext(visitorId, conversationId, requestId, requestId), input);
+            completeTool(visitorId, traceId, execution.complete(
+                    ToolExecutionStatus.SUCCEEDED, Map.of("summary", result.summary()), null, Instant.now()
+            ));
+        } catch (RuntimeException exception) {
+            completeTool(visitorId, traceId, execution.complete(
+                    ToolExecutionStatus.FAILED, Map.of("errorCode", "ACTION_FAILED"), null, Instant.now()
+            ));
+            throw exception;
+        }
         return List.of(
                 assistantMessageEvent(conversationId, requestId, agent, action.descriptor().code(), result.summary()),
                 systemEvent("card.render", conversationId, requestId, agent, action.descriptor().code(), Map.of(
@@ -413,18 +550,15 @@ public class ChatOrchestrator {
         );
     }
 
-    private List<StreamEvent> executeTask(AgentTask task, int confirmationVersion, String requestId) {
-        AgentTask dispatched = store.transitionTask(
-                task.visitorId(),
-                task.id(),
-                TaskStatus.WAITING_CONFIRMATION,
-                confirmationVersion,
-                TaskStatus.DISPATCHED,
-                null
-        ).orElseThrow(this::confirmationConflict);
+    private List<StreamEvent> executeTask(AgentTask dispatched, String requestId) {
         OwnedAction owned = ownedAction(dispatched.actionCode());
         assertOwnership(dispatched.domainCode(), owned);
         RegisteredDomainAgent agent = agent(dispatched.domainCode());
+        ToolExecutionRecord execution = startedExecution(
+                dispatched.id(), dispatched.conversationId(), dispatched.actionCode(), requestId, dispatched.input()
+        );
+        store.saveToolExecution(execution);
+        String traceId = traceRecorder.traceIdFor(requestId);
         ActionResult result;
         try {
             result = owned.action().execute(new ActionContext(
@@ -433,13 +567,34 @@ public class ChatOrchestrator {
                     requestId,
                     dispatched.idempotencyKey()
             ), dispatched.input());
-        } catch (RuntimeException exception) {
-            store.transitionTask(
-                    dispatched.visitorId(), dispatched.id(), TaskStatus.DISPATCHED,
-                    confirmationVersion, TaskStatus.FAILED, null
-            );
-            store.audit(dispatched.visitorId(), dispatched.id(), "ACTION_FAILED");
+        } catch (BusinessException exception) {
+            AgentTask failed = store.transitionTask(
+                    dispatched.visitorId(), dispatched.id(), TaskStatus.DISPATCHED, dispatched.version(),
+                    TaskStatus.FAILED, TaskTransition.failed(exception.code().name())
+            ).orElse(dispatched);
+            completeTool(dispatched.visitorId(), traceId, execution.complete(
+                    ToolExecutionStatus.FAILED, Map.of("errorCode", exception.code().name()), null, Instant.now()
+            ));
+            audit(failed.visitorId(), failed.id(), requestId, "ACTION_FAILED", Map.of("errorCode", exception.code().name()));
+            traceRecorder.recordTask(traceId, dispatched.visitorId(), failed, SpanStatus.ERROR,
+                    "task.execute", Map.of("status", failed.status().name()), Instant.now());
             throw exception;
+        } catch (RuntimeException exception) {
+            AgentTask unknown = store.transitionTask(
+                    dispatched.visitorId(), dispatched.id(), TaskStatus.DISPATCHED, dispatched.version(),
+                    TaskStatus.UNKNOWN,
+                    new TaskTransition(null, null, "RESULT_UNKNOWN", null, Instant.now().plus(1, ChronoUnit.MINUTES), 0)
+            ).orElseThrow(this::confirmationConflict);
+            completeTool(dispatched.visitorId(), traceId, execution.complete(
+                    ToolExecutionStatus.UNKNOWN, Map.of("errorCode", "RESULT_UNKNOWN"), null, Instant.now()
+            ));
+            audit(unknown.visitorId(), unknown.id(), requestId, "ACTION_RESULT_UNKNOWN", Map.of());
+            traceRecorder.recordTask(traceId, dispatched.visitorId(), unknown, SpanStatus.UNKNOWN,
+                    "task.execute", Map.of("status", unknown.status().name()), Instant.now());
+            return List.of(systemEvent(
+                    "task.status", unknown.conversationId(), requestId, agent, unknown.actionCode(),
+                    Map.of("taskId", unknown.id(), "status", unknown.status().name(), "externalRef", value(unknown.externalRef()))
+            ));
         }
 
         TaskStatus targetStatus = result.waitingExternalResult()
@@ -448,11 +603,22 @@ public class ChatOrchestrator {
         String externalRef = "demo_" + dispatched.id().substring(4, 12);
         AgentTask completed = store.transitionTask(
                 dispatched.visitorId(), dispatched.id(), TaskStatus.DISPATCHED,
-                confirmationVersion, targetStatus, externalRef
+                dispatched.version(), targetStatus,
+                new TaskTransition(
+                        externalRef, result.summary(), null, null,
+                        result.waitingExternalResult() ? Instant.now().plus(1, ChronoUnit.MINUTES) : null, 0
+                )
         ).orElseThrow(() -> new BusinessException(
                 ErrorCode.TASK_CONFIRMATION_CONFLICT, "任务执行状态已变化，请刷新后重试"
         ));
-        store.audit(completed.visitorId(), completed.id(), "ACTION_" + completed.status());
+        completeTool(dispatched.visitorId(), traceId, execution.complete(
+                result.waitingExternalResult() ? ToolExecutionStatus.WAITING_EXTERNAL : ToolExecutionStatus.SUCCEEDED,
+                Map.of("summary", result.summary()), externalRef,
+                result.waitingExternalResult() ? null : Instant.now()
+        ));
+        audit(completed.visitorId(), completed.id(), requestId, "ACTION_" + completed.status(), Map.of());
+        traceRecorder.recordTask(traceId, dispatched.visitorId(), completed, SpanStatus.OK,
+                "task.execute", Map.of("status", completed.status().name()), Instant.now());
         return List.of(
                 assistantMessageEvent(
                         completed.conversationId(), requestId, agent, completed.actionCode(), result.summary()
@@ -469,14 +635,20 @@ public class ChatOrchestrator {
         );
     }
 
-    private ConversationRoutingContext routingContext(String visitorId, Conversation conversation) {
+    private ConversationRoutingContext routingContext(
+            String visitorId,
+            Conversation conversation,
+            String requestId
+    ) {
         boolean writePending = store.findActivePending(visitorId, conversation.id()).isPresent()
                 || !store.findActiveTasks(visitorId, conversation.id()).isEmpty();
         return new ConversationRoutingContext(
                 conversation.id(),
                 conversation.activeAgentCode(),
                 conversation.routingVersion(),
-                writePending
+                writePending,
+                visitorId,
+                requestId
         );
     }
 
@@ -506,6 +678,10 @@ public class ChatOrchestrator {
             String requestId,
             RouteDecision route
     ) {
+        traceRecorder.recordRoute(
+                traceRecorder.traceIdFor(requestId), visitorId, conversation.id(), requestId,
+                route.targetAgentCode(), route.type().name(), route.source().name(), Instant.now()
+        );
         store.saveRouteDecision(new RouteDecisionRecord(
                 "rte_" + UUID.randomUUID(),
                 visitorId,
@@ -521,6 +697,37 @@ public class ChatOrchestrator {
                 route.clarificationCandidates(),
                 Instant.now()
         ));
+    }
+
+    private void completeTool(
+            String visitorId,
+            String traceId,
+            ToolExecutionRecord execution
+    ) {
+        store.saveToolExecution(execution);
+        SpanStatus status = switch (execution.status()) {
+            case SUCCEEDED, WAITING_EXTERNAL -> SpanStatus.OK;
+            case FAILED -> SpanStatus.ERROR;
+            case UNKNOWN -> SpanStatus.UNKNOWN;
+            case STARTED -> SpanStatus.SKIPPED;
+        };
+        Object error = execution.outputSummary().get("errorCode");
+        traceRecorder.recordTool(
+                traceId, visitorId, execution.conversationId(), execution.taskId(),
+                traceId, execution.toolCode(), status,
+                error == null ? null : String.valueOf(error),
+                execution.startedAt(), execution.finishedAt()
+        );
+    }
+
+    private static Map<String, Object> resourceVersions(AgentAppRuntimeContext appContext) {
+        if (appContext == null) {
+            return Map.of();
+        }
+        return Map.of(
+                "appCode", appContext.appCode(),
+                "modelCode", appContext.modelCode()
+        );
     }
 
     private StreamEvent routeEvent(
@@ -563,6 +770,17 @@ public class ChatOrchestrator {
             String content,
             RouteDecision route
     ) {
+        return coordinatorConversationMessage(visitorId, conversation, requestId, content, route, null);
+    }
+
+    private StreamEvent coordinatorConversationMessage(
+            String visitorId,
+            Conversation conversation,
+            String requestId,
+            String content,
+            RouteDecision route,
+            AgentAppRuntimeContext appContext
+    ) {
         List<ChatMessage> messages = store.messages(visitorId, conversation.id()).stream()
                 .filter(message -> "message.final".equals(message.eventType()))
                 .filter(message -> List.of("USER", "ASSISTANT").contains(message.role()))
@@ -573,7 +791,12 @@ public class ChatOrchestrator {
                         content,
                         messages.subList(fromIndex, messages.size()),
                         publicDescriptors(),
-                        route.clarificationCandidates()
+                        route.clarificationCandidates(),
+                        appContext,
+                        visitorId,
+                        conversation.id(),
+                        requestId,
+                        traceRecorder.traceIdFor(requestId)
                 )
         );
         return coordinatorMessage(conversation.id(), requestId, reply);
@@ -699,6 +922,14 @@ public class ChatOrchestrator {
         );
     }
 
+    private OwnedAction selectedOwnedAction(String actionCode, List<ActionDescriptor> allowedActions) {
+        try {
+            return ownedAction(modelActionSelectionPolicy.select(actionCode, allowedActions).code());
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "模型选择了不允许的领域动作");
+        }
+    }
+
     private void assertOwnership(String agentCode, OwnedAction owned) {
         if (!owned.agentCode().equals(agentCode)) {
             throw new BusinessException(
@@ -718,17 +949,32 @@ public class ChatOrchestrator {
         return new BusinessException(ErrorCode.TASK_CONFIRMATION_CONFLICT, "当前操作状态已变化，请刷新后重新确认");
     }
 
-    private String confirmationHash(String actionCode, Map<String, Object> input) {
-        String canonical = actionCode + '|' + input.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .map(entry -> entry.getKey() + '=' + String.valueOf(entry.getValue()))
-                .reduce("", (left, right) -> left.isEmpty() ? right : left + '&' + right);
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("JVM does not provide SHA-256", exception);
-        }
+    private ToolExecutionRecord startedExecution(
+            String taskId,
+            String conversationId,
+            String toolCode,
+            String traceId,
+            Map<String, Object> input
+    ) {
+        Instant now = Instant.now();
+        return new ToolExecutionRecord(
+                "tex_" + UUID.randomUUID(), taskId, conversationId, toolCode, "runtime-v1",
+                ToolExecutionStatus.STARTED, Map.of("fields", input.keySet().stream().sorted().toList()),
+                Map.of(), null, traceId, now, null
+        );
+    }
+
+    private void audit(
+            String visitorId,
+            String taskId,
+            String requestId,
+            String eventType,
+            Map<String, Object> metadata
+    ) {
+        store.saveAudit(new AuditRecord(
+                "aud_" + UUID.randomUUID(), visitorId, taskId, requestId,
+                eventType, "VISITOR", metadata, Instant.now()
+        ));
     }
 
     private String value(String nullableValue) {

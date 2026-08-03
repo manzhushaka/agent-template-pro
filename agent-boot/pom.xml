@@ -21,6 +21,17 @@
       <artifactId>api-console</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!-- 受控 Agent 开放 API，与 Chat/Console 共用同一个 Runtime 执行链。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>api-agent</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>agent-control-plane</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <!-- 具体技术集成与基础设施适配器。 -->
     <dependency>
       <groupId>com.manzhushaka</groupId>
@@ -71,6 +82,15 @@
         <dependency>
           <groupId>org.springframework.ai</groupId>
           <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>model-dashscope</id>
+      <dependencies>
+        <dependency>
+          <groupId>com.alibaba.cloud.ai</groupId>
+          <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
         </dependency>
       </dependencies>
     </profile>

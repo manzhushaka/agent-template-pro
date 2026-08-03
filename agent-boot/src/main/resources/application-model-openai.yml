@@ -3,6 +3,9 @@ spring:
     activate:
       on-profile: model-openai
   ai:
+    model:
+      chat: ${AGENT_CHAT_MODEL_PROVIDER:none}
+      embedding: ${AGENT_EMBEDDING_MODEL_PROVIDER:none}
     openai:
       api-key: ${OPENAI_API_KEY:}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
@@ -10,6 +13,9 @@ spring:
         options:
           model: ${OPENAI_CHAT_MODEL:gpt-4o-mini}
           temperature: 0
+      embedding:
+        options:
+          model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
 
 agent:
   model:

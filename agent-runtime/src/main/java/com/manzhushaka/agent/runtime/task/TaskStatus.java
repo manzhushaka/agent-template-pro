@@ -26,8 +26,8 @@ public enum TaskStatus {
             case COLLECTING_INPUT -> EnumSet.of(WAITING_CONFIRMATION, CANCELLED, EXPIRED);
             case WAITING_CONFIRMATION -> EnumSet.of(DISPATCHED, CANCELLED, EXPIRED);
             case DISPATCHED -> EnumSet.of(WAITING_EXTERNAL_RESULT, SUCCEEDED, FAILED, UNKNOWN, MANUAL);
-            case WAITING_EXTERNAL_RESULT -> EnumSet.of(SUCCEEDED, FAILED, UNKNOWN, MANUAL);
-            case UNKNOWN -> EnumSet.of(SUCCEEDED, FAILED, MANUAL);
+            case WAITING_EXTERNAL_RESULT -> EnumSet.of(WAITING_EXTERNAL_RESULT, SUCCEEDED, FAILED, UNKNOWN, MANUAL);
+            case UNKNOWN -> EnumSet.of(UNKNOWN, SUCCEEDED, FAILED, MANUAL);
             case FAILED -> EnumSet.of(DISPATCHED, MANUAL);
             case SUCCEEDED, CANCELLED, EXPIRED, MANUAL -> EnumSet.noneOf(TaskStatus.class);
         };

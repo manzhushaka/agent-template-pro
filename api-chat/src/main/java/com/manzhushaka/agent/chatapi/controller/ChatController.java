@@ -15,6 +15,7 @@ import com.manzhushaka.agent.runtime.chat.Conversation;
 import com.manzhushaka.agent.runtime.event.StreamEvent;
 import com.manzhushaka.agent.runtime.identity.VisitorCookie;
 import com.manzhushaka.agent.runtime.identity.VisitorIdentityService;
+import com.manzhushaka.agent.runtime.recovery.TaskRecoveryService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpCookie;
 import org.springframework.http.HttpStatus;
@@ -33,6 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -43,10 +45,16 @@ import java.util.UUID;
 public class ChatController {
     private final ChatOrchestrator orchestrator;
     private final VisitorIdentityService identity;
+    private final TaskRecoveryService taskRecoveryService;
 
-    public ChatController(ChatOrchestrator orchestrator, VisitorIdentityService identity) {
+    public ChatController(
+            ChatOrchestrator orchestrator,
+            VisitorIdentityService identity,
+            TaskRecoveryService taskRecoveryService
+    ) {
         this.orchestrator = orchestrator;
         this.identity = identity;
+        this.taskRecoveryService = taskRecoveryService;
     }
 
     @GetMapping("/bootstrap")
@@ -155,6 +163,16 @@ public class ChatController {
     @GetMapping("/tasks/{id}")
     public TaskResponse task(@PathVariable String id, ServerWebExchange exchange) {
         var task = orchestrator.task(visitor(exchange), id);
+        return TaskResponse.from(task, agentName(task.domainCode()));
+    }
+
+    @PostMapping("/tasks/{id}:recover")
+    public TaskResponse recoverTask(
+            @PathVariable String id,
+            @RequestHeader(value = "X-Client-Request-Id", required = false) String requestId,
+            ServerWebExchange exchange
+    ) {
+        var task = taskRecoveryService.recover(visitor(exchange), id, requestId(requestId), Instant.now());
         return TaskResponse.from(task, agentName(task.domainCode()));
     }
 

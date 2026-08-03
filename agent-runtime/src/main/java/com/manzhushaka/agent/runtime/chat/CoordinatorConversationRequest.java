@@ -9,7 +9,12 @@ public record CoordinatorConversationRequest(
         String content,
         List<ChatMessage> history,
         List<DomainAgentDescriptor> availableAgents,
-        List<String> clarificationCandidates
+        List<String> clarificationCandidates,
+        AgentAppRuntimeContext appContext,
+        String visitorId,
+        String conversationId,
+        String requestId,
+        String traceId
 ) {
     public CoordinatorConversationRequest {
         history = history == null ? List.of() : List.copyOf(history);
@@ -17,5 +22,14 @@ public record CoordinatorConversationRequest(
         clarificationCandidates = clarificationCandidates == null
                 ? List.of()
                 : List.copyOf(clarificationCandidates);
+    }
+
+    public CoordinatorConversationRequest(
+            String content,
+            List<ChatMessage> history,
+            List<DomainAgentDescriptor> availableAgents,
+            List<String> clarificationCandidates
+    ) {
+        this(content, history, availableAgents, clarificationCandidates, null, null, null, null, null);
     }
 }

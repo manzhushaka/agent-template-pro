@@ -15,7 +15,8 @@ public final class ConsoleAuthenticationException extends RuntimeException {
     public enum Reason {
         INVALID_CAPTCHA("CONSOLE_CAPTCHA_INVALID", "图片验证码错误或已过期，请重新输入。"),
         INVALID_CREDENTIALS("CONSOLE_CREDENTIALS_INVALID", "用户名或密码错误。"),
-        SESSION_INVALID("CONSOLE_SESSION_INVALID", "登录会话已失效，请重新登录。");
+        SESSION_INVALID("CONSOLE_SESSION_INVALID", "登录会话已失效，请重新登录。"),
+        LOGIN_LOCKED("CONSOLE_LOGIN_LOCKED", "登录失败次数过多，请稍后再试。");
 
         private final String code;
         private final String message;

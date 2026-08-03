@@ -4,10 +4,20 @@ import com.manzhushaka.agent.consoleapi.dto.ConsoleCaptchaResponse;
 import com.manzhushaka.agent.consoleapi.dto.ConsoleErrorResponse;
 import com.manzhushaka.agent.consoleapi.dto.ConsoleLoginRequest;
 import com.manzhushaka.agent.consoleapi.dto.ConsoleLoginResponse;
+import com.manzhushaka.agent.consoleapi.dto.ConsoleConversationResponse;
+import com.manzhushaka.agent.consoleapi.dto.ConsoleEventResponse;
+import com.manzhushaka.agent.consoleapi.dto.ConsoleOverviewResponse;
+import com.manzhushaka.agent.consoleapi.dto.ConsoleTaskDetailResponse;
+import com.manzhushaka.agent.consoleapi.dto.ConsoleTaskResponse;
+import com.manzhushaka.agent.consoleapi.dto.CursorPageResponse;
+import com.manzhushaka.agent.consoleapi.dto.PageResponse;
 import com.manzhushaka.agent.consoleapi.security.ConsoleAuthenticationException;
 import com.manzhushaka.agent.consoleapi.security.ConsoleAuthenticationService;
+import com.manzhushaka.agent.consoleapi.service.ConsoleResourceNotFoundException;
+import com.manzhushaka.agent.consoleapi.service.ConsoleRuntimeQueryService;
+import com.manzhushaka.agent.controlplane.ControlPlaneAccessDeniedException;
+import com.manzhushaka.agent.controlplane.ControlPlaneService;
 import com.manzhushaka.agent.runtime.chat.ChatOrchestrator;
-import com.manzhushaka.agent.runtime.task.AgentTask;
 import jakarta.validation.Valid;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -18,10 +28,13 @@ import org.springframework.web.bind.support.WebExchangeBindException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.server.reactive.ServerHttpRequest;
 
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -32,15 +45,18 @@ import java.util.Map;
 public class ConsoleController {
     private final ChatOrchestrator orchestrator;
     private final ConsoleAuthenticationService authenticationService;
+    private final ConsoleRuntimeQueryService runtimeQueryService;
     private final Environment environment;
 
     public ConsoleController(
             ChatOrchestrator orchestrator,
             ConsoleAuthenticationService authenticationService,
+            ConsoleRuntimeQueryService runtimeQueryService,
             Environment environment
     ) {
         this.orchestrator = orchestrator;
         this.authenticationService = authenticationService;
+        this.runtimeQueryService = runtimeQueryService;
         this.environment = environment;
     }
 
@@ -52,16 +68,23 @@ public class ConsoleController {
     }
 
     @PostMapping("/auth/login")
-    public ResponseEntity<ConsoleLoginResponse> login(@Valid @RequestBody ConsoleLoginRequest request) {
+    public ResponseEntity<ConsoleLoginResponse> login(@Valid @RequestBody ConsoleLoginRequest request, ServerHttpRequest httpRequest) {
         ConsoleLoginResponse response = authenticationService.login(
                 request.username(),
                 request.password(),
                 request.captchaId(),
-                request.captchaCode()
+                request.captchaCode(),
+                clientIdentity(httpRequest)
         );
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(response);
+    }
+
+    private String clientIdentity(ServerHttpRequest request) {
+        return request.getRemoteAddress() == null || request.getRemoteAddress().getAddress() == null
+                ? "unknown"
+                : request.getRemoteAddress().getAddress().getHostAddress();
     }
 
     @PostMapping("/auth/logout")
@@ -73,28 +96,18 @@ public class ConsoleController {
     }
 
     @GetMapping("/overview")
-    public Map<String, Object> overview(
+    public ConsoleOverviewResponse overview(
             @RequestHeader(value = "Authorization", required = false) String authorization
     ) {
-        authenticationService.requireSession(authorization);
-        List<AgentTask> tasks = orchestrator.tasks();
-        long active = tasks.stream()
-                .filter(task -> task.status().name().startsWith("WAITING"))
-                .count();
-        return Map.of(
-                "health", "UP",
-                "taskTotal", tasks.size(),
-                "activeTasks", active,
-                "agentTotal", orchestrator.registeredAgents().size(),
-                "mode", "in-memory-demo"
-        );
+        requireRuntimeRead(authorization);
+        return runtimeQueryService.overview();
     }
 
     @GetMapping("/agents")
     public List<Map<String, Object>> agents(
             @RequestHeader(value = "Authorization", required = false) String authorization
     ) {
-        authenticationService.requireSession(authorization);
+        requireRuntimeRead(authorization);
         return orchestrator.registeredAgents().stream().map(agent -> {
             var metrics = orchestrator.routeMetrics(agent.descriptor().code());
             Map<String, Long> modes = agent.actions().values().stream().collect(java.util.stream.Collectors.groupingBy(
@@ -120,18 +133,54 @@ public class ConsoleController {
     }
 
     @GetMapping("/tasks")
-    public List<AgentTask> tasks(
+    public PageResponse<ConsoleTaskResponse> tasks(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "actionCode", required = false) String actionCode,
+            @RequestParam(value = "query", required = false) String query
+    ) {
+        requireRuntimeRead(authorization);
+        return runtimeQueryService.tasks(page, size, status, actionCode, query);
+    }
+
+    @GetMapping("/tasks/{id}")
+    public ConsoleTaskDetailResponse task(
+            @PathVariable String id,
             @RequestHeader(value = "Authorization", required = false) String authorization
     ) {
-        authenticationService.requireSession(authorization);
-        return orchestrator.tasks();
+        requireRuntimeRead(authorization);
+        return runtimeQueryService.task(id);
+    }
+
+    @GetMapping("/conversations")
+    public PageResponse<ConsoleConversationResponse> conversations(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size,
+            @RequestParam(value = "query", required = false) String query
+    ) {
+        requireRuntimeRead(authorization);
+        return runtimeQueryService.conversations(page, size, query);
+    }
+
+    @GetMapping("/conversations/{id}/events")
+    public CursorPageResponse<ConsoleEventResponse> conversationEvents(
+            @PathVariable String id,
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "afterSequence", defaultValue = "0") long afterSequence,
+            @RequestParam(value = "limit", defaultValue = "100") int limit
+    ) {
+        requireRuntimeRead(authorization);
+        return runtimeQueryService.conversationEvents(id, afterSequence, limit);
     }
 
     @GetMapping("/runtime-config")
     public Map<String, Object> config(
             @RequestHeader(value = "Authorization", required = false) String authorization
     ) {
-        authenticationService.requireSession(authorization);
+        requireRuntimeRead(authorization);
         return Map.of(
                 "visitorIdentity", "HMAC cookie",
                 "storage", environment.acceptsProfiles(Profiles.of("runtime-jdbc"))
@@ -170,8 +219,18 @@ public class ConsoleController {
         return value != null && !value.isBlank();
     }
 
+    private void requireRuntimeRead(String authorization) {
+        authenticationService.requirePermission(authorization, ControlPlaneService.RUNTIME_READ);
+    }
+
     @ExceptionHandler(ConsoleAuthenticationException.class)
     public ResponseEntity<ConsoleErrorResponse> handleAuthentication(ConsoleAuthenticationException exception) {
+        if (exception.reason() == ConsoleAuthenticationException.Reason.LOGIN_LOCKED) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .header("Retry-After", "900")
+                    .cacheControl(CacheControl.noStore())
+                    .body(new ConsoleErrorResponse(exception.reason().code(), exception.reason().message()));
+        }
         HttpStatus status = exception.reason()
                 == ConsoleAuthenticationException.Reason.INVALID_CAPTCHA
                 ? HttpStatus.BAD_REQUEST
@@ -181,10 +240,27 @@ public class ConsoleController {
                 .body(new ConsoleErrorResponse(exception.reason().code(), exception.reason().message()));
     }
 
+    @ExceptionHandler(ControlPlaneAccessDeniedException.class)
+    public ResponseEntity<ConsoleErrorResponse> handleForbidden() {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .cacheControl(CacheControl.noStore())
+                .body(new ConsoleErrorResponse(
+                        "CONSOLE_PERMISSION_DENIED",
+                        "当前管理员没有执行此操作的权限。"
+                ));
+    }
+
     @ExceptionHandler(WebExchangeBindException.class)
     public ResponseEntity<ConsoleErrorResponse> handleInvalidRequest() {
         return ResponseEntity.badRequest()
                 .cacheControl(CacheControl.noStore())
                 .body(new ConsoleErrorResponse("CONSOLE_LOGIN_INVALID", "请完整填写用户名、密码和图片验证码。"));
+    }
+
+    @ExceptionHandler(ConsoleResourceNotFoundException.class)
+    public ResponseEntity<ConsoleErrorResponse> handleNotFound(ConsoleResourceNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .cacheControl(CacheControl.noStore())
+                .body(new ConsoleErrorResponse("CONSOLE_RESOURCE_NOT_FOUND", exception.getMessage()));
     }
 }

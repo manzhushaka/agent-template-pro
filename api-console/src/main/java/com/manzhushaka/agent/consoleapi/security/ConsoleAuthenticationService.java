@@ -2,6 +2,11 @@ package com.manzhushaka.agent.consoleapi.security;
 
 import com.manzhushaka.agent.consoleapi.dto.ConsoleCaptchaResponse;
 import com.manzhushaka.agent.consoleapi.dto.ConsoleLoginResponse;
+import com.manzhushaka.agent.controlplane.ControlPlanePrincipal;
+import com.manzhushaka.agent.controlplane.ControlPlaneService;
+import com.manzhushaka.agent.controlplane.security.AdminSession;
+import com.manzhushaka.agent.controlplane.security.AdminSessionStore;
+import com.manzhushaka.agent.controlplane.security.InMemoryAdminSessionStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -25,6 +30,8 @@ import static com.manzhushaka.agent.consoleapi.security.ConsoleAuthenticationExc
 public class ConsoleAuthenticationService {
     private static final char[] CAPTCHA_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ".toCharArray();
     private static final int CAPTCHA_LENGTH = 4;
+    private static final int MAX_LOGIN_FAILURES = 5;
+    private static final Duration LOGIN_LOCK_DURATION = Duration.ofMinutes(15);
 
     private final String configuredUsername;
     private final String configuredPassword;
@@ -32,15 +39,18 @@ public class ConsoleAuthenticationService {
     private final Duration sessionTtl;
     private final Clock clock;
     private final SecureRandom secureRandom;
+    private final AdminSessionStore sessionStore;
+    private final ControlPlaneService controlPlaneService;
     private final Map<String, CaptchaChallenge> captchaChallenges = new ConcurrentHashMap<>();
-    private final Map<String, ConsoleSession> sessions = new ConcurrentHashMap<>();
 
     @Autowired
     public ConsoleAuthenticationService(
             @Value("${agent.console.username}") String configuredUsername,
             @Value("${agent.console.password}") String configuredPassword,
             @Value("${agent.console.captcha-ttl-seconds:120}") long captchaTtlSeconds,
-            @Value("${agent.console.session-ttl-seconds:1800}") long sessionTtlSeconds
+            @Value("${agent.console.session-ttl-seconds:1800}") long sessionTtlSeconds,
+            AdminSessionStore sessionStore,
+            ControlPlaneService controlPlaneService
     ) {
         this(
                 configuredUsername,
@@ -48,7 +58,27 @@ public class ConsoleAuthenticationService {
                 Duration.ofSeconds(captchaTtlSeconds),
                 Duration.ofSeconds(sessionTtlSeconds),
                 Clock.systemUTC(),
-                new SecureRandom()
+                new SecureRandom(),
+                sessionStore,
+                controlPlaneService
+        );
+    }
+
+    public ConsoleAuthenticationService(
+            String configuredUsername,
+            String configuredPassword,
+            long captchaTtlSeconds,
+            long sessionTtlSeconds
+    ) {
+        this(
+                configuredUsername,
+                configuredPassword,
+                Duration.ofSeconds(captchaTtlSeconds),
+                Duration.ofSeconds(sessionTtlSeconds),
+                Clock.systemUTC(),
+                new SecureRandom(),
+                new InMemoryAdminSessionStore(),
+                new ControlPlaneService()
         );
     }
 
@@ -60,12 +90,36 @@ public class ConsoleAuthenticationService {
             Clock clock,
             SecureRandom secureRandom
     ) {
+        this(
+                configuredUsername,
+                configuredPassword,
+                captchaTtl,
+                sessionTtl,
+                clock,
+                secureRandom,
+                new InMemoryAdminSessionStore(),
+                new ControlPlaneService()
+        );
+    }
+
+    ConsoleAuthenticationService(
+            String configuredUsername,
+            String configuredPassword,
+            Duration captchaTtl,
+            Duration sessionTtl,
+            Clock clock,
+            SecureRandom secureRandom,
+            AdminSessionStore sessionStore,
+            ControlPlaneService controlPlaneService
+    ) {
         this.configuredUsername = configuredUsername;
         this.configuredPassword = configuredPassword;
         this.captchaTtl = captchaTtl;
         this.sessionTtl = sessionTtl;
         this.clock = clock;
         this.secureRandom = secureRandom;
+        this.sessionStore = sessionStore;
+        this.controlPlaneService = controlPlaneService;
     }
 
     public ConsoleCaptchaResponse createCaptcha() {
@@ -83,40 +137,68 @@ public class ConsoleAuthenticationService {
             String captchaId,
             String captchaCode
     ) {
+        return login(username, password, captchaId, captchaCode, "unknown");
+    }
+
+    public ConsoleLoginResponse login(
+            String username,
+            String password,
+            String captchaId,
+            String captchaCode,
+            String clientIdentity
+    ) {
         removeExpiredEntries();
+        String loginKey = loginAttemptHash(username, clientIdentity);
+        if (sessionStore.loginLockedUntil(loginKey, clock.instant()).isPresent()) {
+            throw new ConsoleAuthenticationException(ConsoleAuthenticationException.Reason.LOGIN_LOCKED);
+        }
         CaptchaChallenge challenge = captchaChallenges.remove(captchaId);
         if (challenge == null
                 || !challenge.expiresAt().isAfter(clock.instant())
                 || !constantTimeEquals(challenge.code(), normalizeCaptcha(captchaCode))) {
+            recordLoginFailure(loginKey);
             throw new ConsoleAuthenticationException(INVALID_CAPTCHA);
         }
         if (!constantTimeEquals(configuredUsername, username)
                 || !constantTimeEquals(configuredPassword, password)) {
+            recordLoginFailure(loginKey);
             throw new ConsoleAuthenticationException(INVALID_CREDENTIALS);
         }
 
         String token = randomToken(32);
         Instant expiresAt = clock.instant().plus(sessionTtl);
-        sessions.put(token, new ConsoleSession(configuredUsername, expiresAt));
-        return new ConsoleLoginResponse(token, configuredUsername, "ADMIN", expiresAt);
+        String role = "ADMIN";
+        sessionStore.clearLoginFailures(loginKey);
+        sessionStore.create(tokenHash(token), new AdminSession(configuredUsername, role, expiresAt), clock.instant());
+        return new ConsoleLoginResponse(token, configuredUsername, role, expiresAt);
     }
 
     public String requireSession(String authorizationHeader) {
+        return requirePrincipal(authorizationHeader).username();
+    }
+
+    public ControlPlanePrincipal requirePrincipal(String authorizationHeader) {
         String token = bearerToken(authorizationHeader);
-        ConsoleSession session = token == null ? null : sessions.get(token);
-        if (session == null || !session.expiresAt().isAfter(clock.instant())) {
+        AdminSession session = token == null ? null : sessionStore.findActive(tokenHash(token), clock.instant()).orElse(null);
+        if (session == null) {
             if (token != null) {
-                sessions.remove(token);
+                sessionStore.invalidate(tokenHash(token), clock.instant());
             }
             throw new ConsoleAuthenticationException(SESSION_INVALID);
         }
-        return session.username();
+        return controlPlaneService.principal(session.username(), session.role());
+    }
+
+    public ControlPlanePrincipal requirePermission(String authorizationHeader, String permission) {
+        ControlPlanePrincipal principal = requirePrincipal(authorizationHeader);
+        controlPlaneService.require(principal, permission);
+        return principal;
     }
 
     public void logout(String authorizationHeader) {
         String token = bearerToken(authorizationHeader);
         if (token != null) {
-            sessions.remove(token);
+            sessionStore.invalidate(tokenHash(token), clock.instant());
         }
     }
 
@@ -127,7 +209,6 @@ public class ConsoleAuthenticationService {
     private void removeExpiredEntries() {
         Instant now = clock.instant();
         captchaChallenges.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(now));
-        sessions.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(now));
     }
 
     private String randomCaptchaCode() {
@@ -168,6 +249,10 @@ public class ConsoleAuthenticationService {
         return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
     }
 
+    private void recordLoginFailure(String loginKey) {
+        sessionStore.recordLoginFailure(loginKey, clock.instant(), MAX_LOGIN_FAILURES, LOGIN_LOCK_DURATION);
+    }
+
     private boolean constantTimeEquals(String expected, String actual) {
         byte[] expectedBytes = expected == null ? new byte[0] : expected.getBytes(StandardCharsets.UTF_8);
         byte[] actualBytes = actual == null ? new byte[0] : actual.getBytes(StandardCharsets.UTF_8);
@@ -182,9 +267,26 @@ public class ConsoleAuthenticationService {
         return token.isEmpty() ? null : token;
     }
 
+    private String tokenHash(String token) {
+        if (token == null) {
+            return "";
+        }
+        byte[] digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+        return java.util.HexFormat.of().formatHex(digest);
+    }
+
+    private String loginAttemptHash(String username, String clientIdentity) {
+        String value = (username == null ? "" : username.trim().toLowerCase(Locale.ROOT))
+                + '\u0000' + (clientIdentity == null ? "unknown" : clientIdentity);
+        return tokenHash(value);
+    }
+
     private record CaptchaChallenge(String code, Instant expiresAt) {
     }
 
-    private record ConsoleSession(String username, Instant expiresAt) {
-    }
 }

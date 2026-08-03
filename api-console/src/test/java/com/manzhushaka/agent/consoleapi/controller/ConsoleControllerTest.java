@@ -2,7 +2,10 @@ package com.manzhushaka.agent.consoleapi.controller;
 
 import com.manzhushaka.agent.consoleapi.dto.ConsoleCaptchaResponse;
 import com.manzhushaka.agent.consoleapi.dto.ConsoleLoginResponse;
+import com.manzhushaka.agent.consoleapi.dto.ConsoleOverviewResponse;
+import com.manzhushaka.agent.consoleapi.dto.PageResponse;
 import com.manzhushaka.agent.consoleapi.security.ConsoleAuthenticationService;
+import com.manzhushaka.agent.consoleapi.service.ConsoleRuntimeQueryService;
 import com.manzhushaka.agent.runtime.chat.ChatOrchestrator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,7 +29,13 @@ class ConsoleControllerTest {
     @BeforeEach
     void setUp() {
         ChatOrchestrator orchestrator = mock(ChatOrchestrator.class);
+        ConsoleRuntimeQueryService runtimeQueryService = mock(ConsoleRuntimeQueryService.class);
         when(orchestrator.tasks()).thenReturn(List.of());
+        when(runtimeQueryService.overview()).thenReturn(new ConsoleOverviewResponse(
+                "READY", "in-memory", 0, 0, 0, 0, 0
+        ));
+        when(runtimeQueryService.tasks(1, 20, null, null, null))
+                .thenReturn(new PageResponse<>(List.of(), 1, 20, 0, 0));
         ConsoleAuthenticationService authenticationService = new ConsoleAuthenticationService(
                 "admin",
                 "Admin123!",
@@ -34,7 +43,12 @@ class ConsoleControllerTest {
                 1800
         );
         client = WebTestClient.bindToController(
-                        new ConsoleController(orchestrator, authenticationService, new MockEnvironment())
+                        new ConsoleController(
+                                orchestrator,
+                                authenticationService,
+                                runtimeQueryService,
+                                new MockEnvironment()
+                        )
                 )
                 .build();
     }
@@ -63,8 +77,18 @@ class ConsoleControllerTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.health").isEqualTo("UP")
+                .jsonPath("$.runtimeStatus").isEqualTo("READY")
                 .jsonPath("$.taskTotal").isEqualTo(0);
+
+        client.get()
+                .uri("/api/console/v1/tasks")
+                .header("Authorization", "Bearer " + login.token())
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.items").isArray()
+                .jsonPath("$.page").isEqualTo(1)
+                .jsonPath("$.total").isEqualTo(0);
 
         client.post()
                 .uri("/api/console/v1/auth/logout")
@@ -92,6 +116,22 @@ class ConsoleControllerTest {
                 .expectStatus().isBadRequest()
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("CONSOLE_CAPTCHA_INVALID");
+    }
+
+    @Test
+    void rateLimitsRepeatedFailedLogins() {
+        for (int attempt = 0; attempt < 5; attempt++) {
+            ConsoleCaptchaResponse captcha = captcha();
+            client.post().uri("/api/console/v1/auth/login")
+                    .bodyValue(new LoginRequest("admin", "wrong", captcha.captchaId(), captchaCode(captcha)))
+                    .exchange().expectStatus().isUnauthorized();
+        }
+        ConsoleCaptchaResponse captcha = captcha();
+        client.post().uri("/api/console/v1/auth/login")
+                .bodyValue(new LoginRequest("admin", "Admin123!", captcha.captchaId(), captchaCode(captcha)))
+                .exchange().expectStatus().isEqualTo(429)
+                .expectHeader().valueEquals("Retry-After", "900")
+                .expectBody().jsonPath("$.code").isEqualTo("CONSOLE_LOGIN_LOCKED");
     }
 
     private ConsoleCaptchaResponse captcha() {

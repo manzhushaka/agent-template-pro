@@ -15,6 +15,11 @@
       <artifactId>agent-runtime</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>agent-control-plane</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <!-- 提供响应式 Web 服务与 HTTP 端点能力。 -->
     <dependency>
       <groupId>org.springframework.boot</groupId>

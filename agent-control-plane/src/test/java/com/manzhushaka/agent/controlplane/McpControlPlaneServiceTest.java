@@ -168,6 +168,7 @@ class McpControlPlaneServiceTest {
     void serializesConcurrentSyncAndBinding() throws Exception {
         CountDownLatch discoveryStarted = new CountDownLatch(1);
         CountDownLatch releaseDiscovery = new CountDownLatch(1);
+        CountDownLatch secondSyncStarted = new CountDownLatch(1);
         InMemoryControlPlaneRepository repository = new InMemoryControlPlaneRepository();
         ControlPlaneService control = new ControlPlaneService(repository);
         ControlPlanePrincipal admin = control.principal("admin", "ADMIN");
@@ -193,7 +194,11 @@ class McpControlPlaneServiceTest {
         try (var executor = Executors.newFixedThreadPool(2)) {
             var first = executor.submit(() -> service.syncServer(admin, serverId));
             assertTrue(discoveryStarted.await(5, TimeUnit.SECONDS));
-            var second = executor.submit(() -> assertThrows(McpSyncConflictException.class, () -> service.syncServer(admin, serverId)));
+            var second = executor.submit(() -> {
+                secondSyncStarted.countDown();
+                return assertThrows(McpSyncConflictException.class, () -> service.syncServer(admin, serverId));
+            });
+            assertTrue(secondSyncStarted.await(5, TimeUnit.SECONDS));
             releaseDiscovery.countDown();
             first.get(5, TimeUnit.SECONDS);
             second.get(5, TimeUnit.SECONDS);

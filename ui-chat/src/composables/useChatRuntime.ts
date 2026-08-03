@@ -1,4 +1,4 @@
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { chatApi, streamChat } from '../api/chat'
 import type {
   AgentIdentity,
@@ -11,6 +11,7 @@ import type {
   ResultCard,
   StreamEvent,
   TaskEvent,
+  TaskSnapshot,
   TimelineItem,
 } from '../types/chat'
 
@@ -25,10 +26,22 @@ export function useChatRuntime() {
   const form = ref<FormState | null>(null)
   const confirm = ref<ConfirmState | null>(null)
   const loading = ref(false)
+  const restoring = ref(false)
   const creating = ref(false)
   const errorMessage = ref('')
   const lastSequence = ref(0)
   const receivedSequences = new Set<number>()
+  let taskPollTimer: number | undefined
+  let recoveryPromise: Promise<void> | null = null
+  const PAGE_SIZE = 200
+  const ACTIVE_TASK_STATUSES = new Set([
+    'CREATED',
+    'COLLECTING_INPUT',
+    'WAITING_CONFIRMATION',
+    'DISPATCHED',
+    'WAITING_EXTERNAL_RESULT',
+    'UNKNOWN',
+  ])
 
   const activeConversation = computed(() => conversations.value.find((item) => item.id === activeId.value))
   const activeAgent = computed<AgentIdentity>(() => {
@@ -81,8 +94,52 @@ export function useChatRuntime() {
   async function open(id: string): Promise<void> {
     activeId.value = id
     resetTimeline()
-    const timeline = await chatApi.timeline(id)
-    timeline.sort((left, right) => left.sequence - right.sequence).forEach(applyTimeline)
+    restoring.value = true
+    try {
+      await loadTimeline(id)
+      await loadEvents(id, 0, true)
+      await reconcileTasks()
+      scheduleTaskPoll()
+    } finally {
+      restoring.value = false
+    }
+  }
+
+  async function loadTimeline(conversationId: string): Promise<void> {
+    let cursor = 0
+    while (true) {
+      const page = await chatApi.timeline(conversationId, cursor, PAGE_SIZE)
+      const normalized = normalizeTimeline(page)
+      normalized.forEach(applyTimeline)
+      if (page.length < PAGE_SIZE) return
+      const nextCursor = page.reduce((maximum, item) => Math.max(maximum, item.sequence), cursor)
+      if (nextCursor <= cursor) return
+      cursor = nextCursor
+    }
+  }
+
+  async function loadEvents(conversationId: string, afterSequence: number, restored: boolean): Promise<void> {
+    let cursor = afterSequence
+    while (true) {
+      const page = await chatApi.events(conversationId, cursor, PAGE_SIZE)
+      page.sort((left, right) => left.sequence - right.sequence)
+        .forEach((event) => applyEvent(event, restored))
+      if (page.length < PAGE_SIZE) return
+      const nextCursor = page.reduce((maximum, event) => Math.max(maximum, event.sequence), cursor)
+      if (nextCursor <= cursor) return
+      cursor = nextCursor
+    }
+  }
+
+  function normalizeTimeline(page: TimelineItem[]): TimelineItem[] {
+    const bySequence = new Map<number, TimelineItem>()
+    page.sort((left, right) => left.sequence - right.sequence).forEach((item) => {
+      const current = bySequence.get(item.sequence)
+      if (!current || item.kind === 'EVENT' || current.role === 'SYSTEM') {
+        bySequence.set(item.sequence, item)
+      }
+    })
+    return [...bySequence.values()].sort((left, right) => left.sequence - right.sequence)
   }
 
   function resetTimeline(): void {
@@ -120,8 +177,32 @@ export function useChatRuntime() {
 
   async function recover(): Promise<void> {
     if (!activeId.value) return
-    const events = await chatApi.events(activeId.value, lastSequence.value)
-    events.forEach((event) => applyEvent(event))
+    if (recoveryPromise) return recoveryPromise
+    recoveryPromise = (async () => {
+      await loadEvents(activeId.value, lastSequence.value, false)
+      await reconcileTasks()
+    })()
+    try {
+      await recoveryPromise
+    } finally {
+      recoveryPromise = null
+    }
+  }
+
+  async function recoverWithRetry(): Promise<void> {
+    const delays = [0, 300, 900, 1800]
+    let failure: unknown
+    for (const delay of delays) {
+      if (delay > 0) await wait(delay)
+      try {
+        await recover()
+        errorMessage.value = ''
+        return
+      } catch (cause) {
+        failure = cause
+      }
+    }
+    throw failure
   }
 
   async function run(path: string, body: unknown): Promise<void> {
@@ -132,7 +213,7 @@ export function useChatRuntime() {
       await refreshConversations()
     } catch (cause) {
       try {
-        await recover()
+        await recoverWithRetry()
       } catch {
         errorMessage.value = cause instanceof Error ? cause.message : '连接失败，请重试。'
       }
@@ -167,6 +248,7 @@ export function useChatRuntime() {
         agent,
       })
     } else if (event.type === 'form.request') {
+      if (!payload.pendingActionId) return
       confirm.value = null
       form.value = {
         pendingActionId: String(payload.pendingActionId),
@@ -175,6 +257,7 @@ export function useChatRuntime() {
         agent,
       }
     } else if (event.type === 'action.confirm') {
+      if (!payload.taskId || !payload.confirmationVersion) return
       form.value = null
       confirm.value = {
         taskId: String(payload.taskId),
@@ -184,6 +267,7 @@ export function useChatRuntime() {
         agent,
       }
     } else if (event.type === 'card.render') {
+      if (cards.value.some((card) => card.sequence === event.sequence)) return
       cards.value.push({
         cardType: String(payload.cardType || '业务结果'),
         data: (payload.data || {}) as Record<string, string | number>,
@@ -192,7 +276,8 @@ export function useChatRuntime() {
         sequence: event.sequence,
       })
     } else if (event.type === 'task.status') {
-      tasks.value.push({
+      if (!payload.taskId) return
+      upsertTask({
         taskId: String(payload.taskId),
         status: String(payload.status),
         externalRef: optionalString(payload.externalRef),
@@ -201,6 +286,68 @@ export function useChatRuntime() {
         sequence: event.sequence,
       })
     }
+  }
+
+  function upsertTask(task: TaskEvent): void {
+    const index = tasks.value.findIndex((item) => item.taskId === task.taskId)
+    if (index < 0) tasks.value.push(task)
+    else if (tasks.value[index] && tasks.value[index].sequence <= task.sequence) tasks.value[index] = task
+    if (confirm.value?.taskId === task.taskId && task.status !== 'WAITING_CONFIRMATION') {
+      confirm.value = null
+    }
+  }
+
+  async function reconcileTasks(): Promise<void> {
+    const taskIds = new Set(tasks.value.map((task) => task.taskId))
+    if (confirm.value?.taskId) taskIds.add(confirm.value.taskId)
+    const snapshots = await Promise.all([...taskIds].map(async (taskId) => {
+      try {
+        return await chatApi.task(taskId)
+      } catch {
+        return null
+      }
+    }))
+    snapshots.filter((task): task is TaskSnapshot => task !== null).forEach((task) => upsertTask({
+      taskId: task.id,
+      status: task.status,
+      externalRef: task.externalRef,
+      agent: identity(task.domainCode, task.agentName),
+      actionCode: task.actionCode,
+      sequence: lastSequence.value,
+    }))
+  }
+
+  function scheduleTaskPoll(): void {
+    if (taskPollTimer !== undefined) window.clearTimeout(taskPollTimer)
+    if (!tasks.value.some((task) => ACTIVE_TASK_STATUSES.has(task.status)) && !confirm.value) return
+    taskPollTimer = window.setTimeout(async () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        await reconcileTasks()
+      }
+      scheduleTaskPoll()
+    }, 4000)
+  }
+
+  async function retryRecovery(): Promise<void> {
+    errorMessage.value = ''
+    restoring.value = true
+    try {
+      await recoverWithRetry()
+      scheduleTaskPoll()
+    } catch (cause) {
+      errorMessage.value = cause instanceof Error ? cause.message : '会话恢复失败，请稍后重试。'
+    } finally {
+      restoring.value = false
+    }
+  }
+
+  function wait(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+  }
+
+  function resumeFromBrowser(): void {
+    if (document.visibilityState !== 'visible' || !navigator.onLine || !activeId.value) return
+    void retryRecovery()
   }
 
   function send(text: string): void {
@@ -252,7 +399,16 @@ export function useChatRuntime() {
     return value === null || value === undefined || value === '' ? undefined : String(value)
   }
 
-  onMounted(() => void initialize())
+  onMounted(() => {
+    window.addEventListener('online', resumeFromBrowser)
+    document.addEventListener('visibilitychange', resumeFromBrowser)
+    void initialize()
+  })
+  onBeforeUnmount(() => {
+    window.removeEventListener('online', resumeFromBrowser)
+    document.removeEventListener('visibilitychange', resumeFromBrowser)
+    if (taskPollTimer !== undefined) window.clearTimeout(taskPollTimer)
+  })
 
   return {
     bootstrap,
@@ -267,6 +423,7 @@ export function useChatRuntime() {
     form,
     confirm,
     loading,
+    restoring,
     creating,
     errorMessage,
     hasContent,
@@ -276,6 +433,7 @@ export function useChatRuntime() {
     selectAgent,
     submitForm,
     decide,
+    retryRecovery,
     nextTick,
   }
 }

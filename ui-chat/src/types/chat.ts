@@ -101,3 +101,13 @@ export interface TaskEvent {
   actionCode?: string
   sequence: number
 }
+
+export interface TaskSnapshot {
+  id: string
+  domainCode: string
+  agentName: string
+  actionCode: string
+  status: string
+  externalRef?: string
+  createdAt: string
+}

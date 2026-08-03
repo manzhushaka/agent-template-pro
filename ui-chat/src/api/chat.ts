@@ -1,4 +1,4 @@
-import type { Bootstrap, Conversation, StreamEvent, TimelineItem } from '../types/chat'
+import type { Bootstrap, Conversation, StreamEvent, TaskSnapshot, TimelineItem } from '../types/chat'
 
 const apiBase = import.meta.env.VITE_API_BASE || '/api/chat/v1'
 
@@ -30,13 +30,17 @@ export const chatApi = {
   bootstrap: () => json<Bootstrap>('/bootstrap', '服务范围加载失败，请稍后重试。'),
   conversations: () => json<Conversation[]>('/conversations', '会话列表加载失败，请稍后重试。'),
   createConversation: () => json<Conversation>('/conversations', '创建会话失败，请稍后重试。', { method: 'POST' }),
-  timeline: (conversationId: string) => json<TimelineItem[]>(
-    `/conversations/${conversationId}/timeline?afterSequence=0&limit=200`,
+  timeline: (conversationId: string, afterSequence: number, limit: number) => json<TimelineItem[]>(
+    `/conversations/${conversationId}/timeline?afterSequence=${afterSequence}&limit=${limit}`,
     '会话记录加载失败，请稍后重试。',
   ),
-  events: (conversationId: string, afterSequence: number) => json<StreamEvent[]>(
-    `/conversations/${conversationId}/events?afterSequence=${afterSequence}`,
+  events: (conversationId: string, afterSequence: number, limit = 200) => json<StreamEvent[]>(
+    `/conversations/${conversationId}/events?afterSequence=${afterSequence}&limit=${limit}`,
     '会话恢复失败，请稍后重试。',
+  ),
+  task: (taskId: string) => json<TaskSnapshot>(
+    `/tasks/${taskId}`,
+    '任务状态加载失败，请稍后重试。',
   ),
 }
 

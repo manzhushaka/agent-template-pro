@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   LoaderCircle,
   LockKeyhole,
+  RefreshCw,
   Send,
   Sparkles,
   X,
@@ -56,14 +57,17 @@ function taskStatusLabel(status: string): string {
     SUCCEEDED: '已完成',
     FAILED: '未完成',
     CANCELLED: '已取消',
+    EXPIRED: '确认已过期',
+    UNKNOWN: '结果确认中',
+    MANUAL: '等待人工处理',
   }
   return labels[status] || status
 }
 
 function taskStatusClass(status: string): string {
   if (status === 'SUCCEEDED') return 'success'
-  if (status === 'FAILED' || status === 'CANCELLED') return 'danger'
-  if (status.includes('WAITING')) return 'warning'
+  if (status === 'FAILED' || status === 'CANCELLED' || status === 'EXPIRED') return 'danger'
+  if (status.includes('WAITING') || status === 'UNKNOWN' || status === 'MANUAL') return 'warning'
   return 'progress'
 }
 
@@ -139,7 +143,7 @@ watch(content, () => void nextTick(resizeComposer))
             </section>
 
             <section v-if="runtime.tasks.value.length" class="task-list" aria-label="任务状态">
-              <article v-for="task in runtime.tasks.value" :key="task.sequence" class="task-item">
+              <article v-for="task in runtime.tasks.value" :key="task.taskId" class="task-item">
                 <span :class="['task-indicator', taskStatusClass(task.status)]"><LoaderCircle v-if="taskStatusClass(task.status) === 'progress'" class="spin" :size="15" /><CheckCircle2 v-else :size="15" /></span>
                 <div><small>{{ task.agent?.name || '业务任务' }} · {{ task.taskId.slice(0, 12) }}</small><strong>{{ taskStatusLabel(task.status) }}</strong><span v-if="task.externalRef">业务编号 {{ task.externalRef }}</span></div>
               </article>
@@ -157,7 +161,7 @@ watch(content, () => void nextTick(resizeComposer))
       </div>
 
       <Transition name="banner">
-        <div v-if="runtime.errorMessage.value" class="error-banner" role="alert"><span>{{ runtime.errorMessage.value }}</span><button type="button" aria-label="关闭错误提示" @click="runtime.errorMessage.value = ''"><X :size="14" /></button></div>
+        <div v-if="runtime.errorMessage.value" class="error-banner" role="alert"><span>{{ runtime.errorMessage.value }}</span><button type="button" aria-label="重新加载" :disabled="runtime.restoring.value" @click="runtime.retryRecovery"><LoaderCircle v-if="runtime.restoring.value" class="spin" :size="14" /><RefreshCw v-else :size="14" /></button><button type="button" aria-label="关闭错误提示" @click="runtime.errorMessage.value = ''"><X :size="14" /></button></div>
       </Transition>
 
       <footer class="composer-wrap">

@@ -101,14 +101,18 @@ flowchart LR
 
 | 迁移 | 主要表 | 目的 |
 | --- | --- | --- |
-| `V002__runtime_recovery.sql` | `agent_pending_action`、`agent_stream_event`、`agent_tool_execution`、`agent_task_outbox` | 补齐恢复、事件游标、工具执行和可靠事件投递 |
-| `V003__console_security.sql` | `agent_admin_user`、`agent_admin_role`、`agent_admin_permission`、关联表、`agent_admin_session` | 管理员认证、共享会话和 RBAC |
-| `V004__model_and_prompt.sql` | `agent_model_provider`、`agent_model_config`、`agent_prompt`、`agent_prompt_version`、`agent_prompt_publication` | 模型与 Prompt 版本化 |
-| `V005__mcp_management.sql` | `agent_mcp_server`、`agent_mcp_sync_job`、`agent_mcp_tool`、`agent_mcp_tool_version` | MCP 配置、能力快照和同步状态 |
-| `V006__knowledge_base.sql` | `agent_knowledge_base`、`agent_knowledge_document`、`agent_knowledge_document_version`、`agent_knowledge_chunk`、`agent_knowledge_index_job` | 知识库元数据、切片和异步索引 |
-| `V007__agent_application.sql` | `agent_application`、`agent_application_version`、`agent_application_binding`、`agent_api_key` | Agent 应用、资源绑定、发布和开放 API |
-| `V008__evaluation.sql` | `agent_eval_dataset`、`agent_eval_dataset_version`、`agent_eval_case`、`agent_evaluator`、`agent_evaluator_version`、`agent_experiment`、`agent_experiment_result` | 评估闭环 |
-| `V009__workflow.sql` | `agent_workflow`、`agent_workflow_version`、`agent_workflow_run`、`agent_workflow_node_run` | Workflow 定义、版本和运行轨迹 |
+| `V002__runtime_recovery.sql` | `agent_pending_action`、`agent_stream_event`、`agent_tool_execution`、`agent_task_outbox` | 已交付：补齐恢复、事件游标、工具执行和可靠事件投递 |
+| `V003__domain_agent_routing.sql` | 会话路由版本、领域 Agent 路由决定 | 已交付：领域 Agent 路由事实与并发切换保护 |
+| `V004__runtime_reliability.sql` | 任务恢复与确认字段、Outbox lease、`agent_graph_checkpoint` | 已交付：确认、恢复、Outbox 和 checkpoint 可靠性补充 |
+| `V005__control_plane_security.sql` | 管理员、角色、权限、共享会话、SecretRef、控制面文档与审计 | 已交付：M2 身份、RBAC、模型与 Prompt 纵向切片 |
+| `V006__mcp_tool_governance.sql` | MCP Server、同步任务、Tool、Tool 版本与权限 | 已交付：M3 MCP 配置、能力快照和绑定治理 |
+| `V007__mcp_persistence_concurrency.sql` | MCP transport 参数与同步 lease 唯一键 | 已交付：M3 JDBC 专表、并发绑定与同步治理 |
+| `V008__knowledge_base.sql` | 知识库、文档、文档版本、切片、索引任务 | 已交付：M4 受控文档、租约索引、补偿与 citation 纵向切片 |
+| `V009__knowledge_embeddings.sql` | 知识切片 embedding 向量 | 已交付：M4 Spring AI EmbeddingModel 的 MySQL 向量持久化 |
+| `V010__knowledge_index_fencing.sql` | 索引任务 lease token/epoch、索引与对象清理索引、对象清理任务 | 已交付：M4 索引租约 fencing、删除并发保护与持久化补偿 |
+| `V011__agent_application.sql` | `agent_application`、`agent_application_version`、`agent_application_binding`、`agent_application_publish_record`、`agent_api_key` | 已交付：M5 Agent 应用、版本快照、资源绑定、发布/回滚、API Key 与受控 OpenAPI |
+| `V012__evaluation.sql` | `agent_eval_dataset`、`agent_eval_dataset_version`、`agent_eval_case`、`agent_evaluator`、`agent_evaluator_version`、`agent_experiment`、`agent_experiment_result` | 规划：M6 评估闭环 |
+| `V013__workflow.sql` | `agent_workflow`、`agent_workflow_version`、`agent_workflow_run`、`agent_workflow_node_run` | 规划：M7 Workflow 定义、版本和运行轨迹 |
 
 关键唯一约束：
 
@@ -134,6 +138,8 @@ flowchart LR
 
 目标：先证明技术基线可用，避免在错误依赖坐标上建设控制面。
 
+执行状态（2026-08-02）：已完成。BOM/Profile、Graph、ReactAgent、Tool、结构化输出、流式调用、`RunnableConfig`、内存 checkpoint、动作白名单和高风险 Tool 拒绝测试已落地。旧 MCP 聚合依赖已排除，annotations 版本已统一，Maven Enforcer 严格依赖收敛对全部模块通过；默认/OpenAI/DashScope 的完整构建和无密钥启动健康检查均通过。
+
 后端任务：
 
 1. 增加 Spring AI Alibaba BOM/Extensions BOM，并验证与 Spring Boot 3.5.14、Spring AI 1.1.2、JDK 21 的依赖收敛。
@@ -152,6 +158,8 @@ flowchart LR
 ### M1：生产级 Runtime 与持久化
 
 目标：替换关键词 Demo 路由和内存事实源，建立后续模块的共同基础。
+
+执行状态（2026-08-03）：已完成。JDBC RuntimeStore 覆盖确认快照 hash/过期/乐观版本、并发确认保护、Outbox claim/retry/dead、ToolExecution/Audit、结果未知恢复与可信外部结果推进；Chat 提供受签名访客归属约束的恢复 API，后台恢复调度默认关闭且仅执行可靠查单，绝不重复原写操作。临时 MySQL 8.4 已完成 V001-V004 Flyway 迁移、`runtime-jdbc` 两次启动和重启后会话读取验证；真实 Redis checkpoint Profile 已连接并健康启动，持久化事实在 Redis 故障时仍可回退。Chat 已实现循环补拉、断流退避与状态对账；Console 已接入会话、任务、事件、工具执行和审计的脱敏真实查询。OpenAI 结构化意图提取已切换到 `ReactAgent.outputType`，并在 Runtime 再次执行动作白名单校验。真实模型供应商调用仍需以部署 Secret 另行验收，不应由本地 stub 覆盖结论推断。
 
 后端任务：
 
@@ -177,6 +185,8 @@ flowchart LR
 - Runtime 单元、MySQL/Redis 集成和 Chat E2E 测试通过。
 
 ### M2：管理安全、模型与 Prompt
+
+执行状态（2026-08-03）：基础安全纵向切片已完成并通过 MySQL 8.4 验收。`agent-control-plane` 已建立数据库事实源的 ADMIN/OPERATOR/VIEWER 权限映射和 fail-closed 默认策略；Console Runtime 查询也受 `runtime:read` 约束。共享会话和登录失败窗口只保存 SHA-256 摘要。SecretRef 的引用定位和值均不进入 API、审计和日志，配置状态由运行环境解析。Provider 测试当前 fail-closed：在具备白名单主机与已绑定连接地址的 Adapter 前不发起网络请求，避免 DNS rebinding TOCTOU。Prompt 并发版本号由 JDBC 锁保护，发布、回滚和各自追加审计在同一事务中完成。V001-V005 已在隔离库完成迁移、并发 API 和重启回读验证。完整管理员目录、Kubernetes/KMS Secret resolver、Provider 协议专用探测和正式模型调用 Adapter 仍需后续迭代。
 
 目标：建立控制面的身份和最先使用的工程能力。
 
@@ -214,6 +224,8 @@ Prompt 管理：
 
 ### M3：MCP 管理与统一工具治理
 
+执行状态（2026-08-03）：MCP 控制面纵向切片已完成。控制台只允许白名单 HTTPS 的 SSE 或 Streamable HTTP endpoint；STDIO 配置默认关闭，启用时还必须命中部署配置的命令白名单，当前 transport adapter 不执行 STDIO 进程。HTTPS transport 会在调用时解析全部 DNS 地址、拒绝内网和保留地址，并直接连接已校验 IP，同时保留 TLS SNI 与主机名校验，避免重定向和 DNS rebinding。Server 只保存 SecretRef 关联并在调用时解析，所有 API、审计和页面均不回显 token、引用定位或命令参数。连接测试、Tool discovery、能力 SHA-256 快照、风险等级、版本固定 Agent 绑定、启停引用冲突、只读 Debug 及审计均已覆盖；Schema、描述、风险或读写属性变化都会生成新版本，既有绑定不会被替换，退役 Tool 只有被远端重新发现后才能再次启用。写类型 Tool 的 Console Debug 固定拒绝，后续 Runtime 接入必须通过既有动作白名单、任务、幂等和二次确认，不存在直接执行旁路。`V006`/`V007` 的 JDBC 专表是 MCP Server、Tool、Tool Version、Agent Binding 和同步 lease 的事实源；`agent_mcp_agent_binding` 与活动同步 key 由数据库唯一键保证，并发重复绑定返回冲突、并发同步只允许单一执行者。
+
 目标：提供完整 MCP 生命周期，同时把外部 Tool 纳入现有安全门禁。
 
 后端任务：
@@ -250,6 +262,8 @@ Prompt 管理：
 
 ### M4：知识库与 RAG 管理
 
+执行状态（2026-08-03）：M4 已关闭（Sol 独立安全验收通过，发现项均为非阻断建议）。`agent-control-plane` 提供独立的知识库、文档、文档版本、切片、索引任务和 embedding 事实表；TXT/Markdown/PDF/DOCX 通过受限文件名、10 MiB 源文件大小和 MIME 白名单写入对象存储。Console 采用受限 JSON 上传契约：二进制 Base64 最大 13,981,016 字符，WebFlux 解码请求上限为 15 MB，服务端会再次校验解码后的实际字节数。PDF 使用受限工作区，DOCX 在解包前执行条目数、单条目和总展开量限制，并以 POI 的更严格 zip-bomb 阈值打开；两类文档都限制页数和提取文本量，正文不写入控制面通用 JSON。索引 worker 使用数据库租约认领（owner+token+fencing，`lease_epoch` 每次认领自增），失败保持可观察的 `FAILED` 状态并只能显式重试；完成前先写向量并在事务内复检租约，删除通过对象与向量索引补偿完成。Console 只返回切片元数据和 citation 标识，绝不返回对象键或正文。对象写入前先持久化清理意图，任何失败路径都落入可重试补偿。默认保留文件系统和确定性检索用于无中间件开发；生产使用 `knowledge-s3` profile 的 SigV4 S3/OSS 兼容对象存储（仅 HTTPS、endpoint 白名单、DNS 快照校验并固定 IP 建连、无用户可控 key）以及 `knowledge-embedding-jdbc` profile 的 Spring AI `EmbeddingModel` + MySQL embedding 表，切片启停会同步影响召回。`V009` 新增 embedding 表，`V010` 补齐索引 fencing、删除并发保护和对象清理任务，二者均已同步至 V001 初始化定义；V010 为 MySQL 兼容条件迁移，已在真实 MySQL 8.4 上验证空库与旧 V009 两条升级路径。Console 对管理员会话实施 token+generation 双重 lease 隔离：退出、401 或重新登录后，旧请求即使晚到也不能回写页面状态；知识库保存后的链式刷新同样重新校验会话，并配套 node 竞态回归测试。M5 发布快照仍负责将知识库版本固定到 Agent 版本。
+
 目标：形成从文档到可引用答案的完整、可诊断知识闭环。
 
 后端任务：
@@ -260,7 +274,7 @@ Prompt 管理：
 4. 支持 TXT、Markdown、PDF、Word 等白名单格式，并限制文件大小、页数和解析时间。
 5. 切片预览、编辑、启停、批量更新和版本化。
 6. 数据库持久化 Index Job，通过 Outbox/worker 执行解析、切片、Embedding、写向量库和状态回写。
-7. `VectorStorePort` 隔离具体产品；首个生产实现按 M0 ADR 选择，推荐 Elasticsearch Profile，不作为核心 Chat 的强制启动依赖。
+7. `VectorStorePort` 隔离具体产品；当前生产 profile 使用 Spring AI `EmbeddingModel` 和 MySQL embedding 表，后续可增加 Elasticsearch 等受管向量适配器，不作为核心 Chat 的强制启动依赖。
 8. 检索测试返回 query、topK、threshold、原始得分、rerank 得分、文档和切片引用。
 9. 回答卡片必须包含可追溯 citation，前端不能伪造来源。
 10. 删除/重建实现数据库、对象存储和向量索引之间的补偿任务。
@@ -287,6 +301,8 @@ Prompt 管理：
 
 ### M5：Agent 应用、版本与开放 API
 
+执行状态（2026-08-03）：M5 已完成并通过真实 MySQL 8.4 冒烟验收。`agent-control-plane` 提供应用 CRUD、草稿版本与资源绑定快照（模型/Prompt/知识库/MCP 绑定）、发布前校验、不可变发布、回滚记录与归档；`agent_application_version` 固定模型、Prompt 版本和知识库版本，`agent_application_binding` 固定 MCP/Tool 版本，发布和回滚在同一事务内更新应用当前版本并追加 `agent_application_publish_record`。API Key 仅保存 SHA-256 hash 与前缀，创建/轮换一次性返回明文，撤销立即生效，过期在调用时校验，归档被有效 Key 阻止；作用域仅限 `chat:completions`。`api-agent` 提供受控 OpenAPI `/api/agent/v1/apps/{appCode}/chat/completions`：X-API-Key 鉴权、已发布版本快照、模型连接校验、Prompt 与知识库 context 注入，并复用 `ChatOrchestrator` 的会话、确认门禁、幂等与审计链，不存在旁路执行；不存在的会话返回 404，未连接模型返回 409。`JdbcAgentApplicationRepository` 在真实 MySQL 上通过版本生命周期、并发发布唯一成功、唯一约束、API Key hash 与即时撤销、归档门禁和审计落库集成测试；`V011` 已同步到 V001 初始化定义，并在空库完成 11 个迁移的启动验证。Console 新增 Agent 应用页面（应用分页/新建/归档、版本校验/发布/回滚、API Key 创建/轮换/撤销、发布记录、受控 OpenAPI 查看），全部连接真实 API，且列表与详情均不回显 hash 与原值。
+
 目标：把模型、Prompt、Tool、MCP 和知识库组装成可发布的 Agent 应用。
 
 后端任务：
@@ -311,6 +327,8 @@ Prompt 管理：
 - Console Debug 与开放 API 使用同一 Runtime、同一 Tool 门禁和同一审计链。
 
 ### M6：可观测性与评估中心
+
+执行状态（2026-08-03）：M6 已完成并通过真实 MySQL 8.4 冒烟验收。Runtime 新增 SpanType/SpanStatus/SpanRecord/SpanQuery/TraceStore/TraceRecorder/TraceQueryPort，请求、路由、动作、任务、确认、Tool、模型与检索链路统一埋点；`agent_runtime_span` 只保存白名单字段与脱敏 metadata，不持久化 Prompt/消息原文。Console 新增 Trace 页面（列表/详情双向定位、模型与 Tool 指标、按类型/状态/时间过滤），全部连接真实 API。`agent-control-plane` 新增评估中心：数据集/版本/用例（手工、批量导入、从脱敏 Trace 生成候选）、10 个确定性评估器插件（意图路由、参数提取、追问、拒绝越权、确认门禁、知识引用、Tool 选择等）与受控 LLM Judge；Experiment 使用 MySQL 数据库任务 + `FOR UPDATE SKIP LOCKED` 租约 worker，支持启动、停止、重试、阈值、成本统计和结果明细。`RuntimeEvaluationExecutor` 复用 `ChatOrchestrator` 的会话、确认门禁、幂等与审计链执行用例，不存在旁路；`V012`（observability_evaluation）与 `V013`（列宽修复）已同步到 V001 初始化定义，并在空库完成 13 个迁移启动验证。真实 MySQL 冒烟已验证：Trace 写入/查询/详情、实验 SUCCEEDED 全流程、崩溃后 RUNNING 无主实验由 worker 重启接管完成、RBAC 401/403、用例/评估器/实验唯一键冲突映射、无模型时确定性回退仍可评估路由事实。Console 新增数据集、评估器、实验页面，服务端分页/筛选/详情/空态齐全，`npm run build` 通过；全仓 `mvn test` 139 项全绿。
 
 目标：让 Agent 变更可度量、可比较、可回归。
 
@@ -344,6 +362,8 @@ Prompt 管理：
 
 ### M7：可视化 Workflow Studio
 
+执行状态（2026-08-03）：M7 已完成并通过真实 MySQL 8.4 冒烟验收。`agent-runtime/workflow` 提供 schema 1.0 的 DAG DSL（单 Start、可达性、环检测、出边条件规则、节点数/边数/字段/prompt 上限）与逐节点持久化执行引擎；`agent_workflow`/`version`/`run`/`node_run`/`event` 五张表由 `V014` 落库（`V015` 加宽 workflow 审计 resource_id），节点唯一键、事件 sequence 唯一、并发发布单赢家与 stale RUNNING 恢复均有集成测试。写节点（Action/MCP Tool）复用 `ChatOrchestrator` 的确认门禁、幂等与任务状态机：`WorkflowActionHandler` 仅在确认后执行，拒绝/过期置 FAILED，外部结果未知阻止 retry；Input 复用 `form.request` 语义。handler 运行时异常被转换为带稳定错误码的节点 FAILED（而非让运行卡在中间态），被中断节点由启动清扫器标记 `INTERRUPTED` 并恢复入边，resume 可重新执行；进程强杀-重启-恢复-确认全流程已在真实 MySQL 冒烟验证。`WorkflowController` 提供 CRUD/版本/校验/发布/回滚/归档与 run start/resume/input/confirm/stop/retry/node-runs/SSE（增量 afterSequence、终态自动关闭），全部经 `WorkflowRunService` 脱敏；RBAC 使用 `workflow:read/write/run`。Console 新增「Workflow 编排」与「Workflow 运行」两页：DSL+绑定 JSON 编辑器、版本快照、校验/发布/调试运行、运行详情抽屉（节点执行表、SSE 事件流、输入/确认/停止/重试），全部连接真实 API。全仓 `mvn test` 182 项全绿、双前端 build 通过；冒烟覆盖正常、失败重试、越权（401/403）、并发、强杀重启恢复与密钥脱敏。
+
 目标：在所有底层资源稳定后，提供受控流程编排，而不是新增第二套不受控 Runtime。
 
 首批节点：
@@ -352,15 +372,16 @@ Prompt 管理：
 - LLM、Parameter Extractor、Classifier、Judge。
 - AgentAction、MCP Tool、Knowledge Retrieval、HTTP Adapter。
 - Variable Assign、Parallel、Iterator、Human Input。
+- 已实现：Start/End、Variable Assign、Input、LLM、Classifier、Action、MCP Tool、Retrieval、Parallel；Iterator 与 HTTP Adapter 留给后续扩展（HTTP 写操作受门禁约束，Adapter 需单独设计）。
 
 实现任务：
 
-1. Workflow DSL、Schema 版本、静态校验、引用锁定和发布快照。
-2. 节点执行统一委托 Runtime/Control Plane，不在节点中直接访问数据库或远端 URL。
-3. 整图 Debug、单节点/局部图测试、SSE 节点进度、暂停、恢复、停止和重试。
-4. 高风险节点生成任务并等待确认；Human Input 使用现有 `form.request` 或新增兼容事件。
-5. Workflow 发布前执行图连通性、循环边界、资源引用、权限和评估检查。
-6. 提供版本差异和回滚；DSL 导入导出最后开放，导入内容必须经过完整校验。
+1. [x] Workflow DSL、Schema 版本、静态校验、引用锁定和发布快照。
+2. [x] 节点执行统一委托 Runtime/Control Plane，不在节点中直接访问数据库或远端 URL。
+3. [x] 整图 Debug、单节点/局部图测试、SSE 节点进度、暂停、恢复、停止和重试。
+4. [x] 高风险节点生成任务并等待确认；Human Input 使用现有 `form.request` 或新增兼容事件。
+5. [x] Workflow 发布前执行图连通性、循环边界、资源引用、权限和评估检查。
+6. [x] 提供版本差异和回滚；DSL 导入导出最后开放，导入内容必须经过完整校验。
 
 验收门槛：
 
@@ -482,5 +503,10 @@ M3 和 M4 可以在 M2 完成后并行建设，但二者都必须复用同一个
 11. `M3-02`：MCP Tool 版本快照、绑定和高风险门禁。
 12. `M4-01`：知识库、文档上传和 Index Job 纵向切片。
 13. `M4-02`：切片管理、向量检索测试和 citation 闭环。
+14. `M5-01`：Agent Application、版本快照、校验、发布、回滚与归档。
+15. `M5-02`：API Key 哈希存储、范围、过期、轮换、撤销与开放 Chat API。
+16. `M6-01`：Trace/Span 采集、模型与 Tool 指标、审计查询和 Console 页面。
+17. `M6-02`：数据集、评估器、实验与回归评估闭环。
+18. `M7-01`：Workflow DSL、节点编辑、调试、暂停恢复与版本发布。
 
 第一批完成后，项目应具备真实模型、可恢复 Runtime、受控 MCP 和可用知识库四条端到端主链，再进入 Agent 应用、评估和 Workflow 建设。

@@ -99,7 +99,7 @@ Spring AI Alibaba Admin 已经不是只有 Prompt 调试页的“小控制台”
 | 评估 | 没有数据集、评估器、实验和结果模型 | **高优先级缺口** |
 | 可观测性 | 有任务审计协议和 Actuator 依赖 | **高优先级缺口**：没有 OTLP、Trace/Span、Token/Latency/Tool 指标 |
 | RAG | 没有知识库、文档、切片或向量存储 | **核心缺口**：已确定建设完整知识库子系统，排在生产 Runtime 和基础控制面之后 |
-| Workflow | 旧设计书明确不做可视化工作流编排器；Runtime 也没有 Graph 实现 | 目标范围已扩展为受控 Workflow Studio，但必须在 Runtime、资源版本和评估稳定后建设 |
+| Workflow | 旧设计书明确不做可视化工作流编排器；Runtime 也没有 Graph 实现 | **M7 已交付**：受控 Workflow Studio（DSL schema 1.0、版本发布/回滚、逐节点持久化、确认门禁复用、SSE 调试、暂停/恢复/停止/重试、启动恢复与 RBAC），未复制官方未完成的门禁实现 |
 | Plugin/MCP | 只有 SPI 的 `AgentAction`，没有外部工具目录、Schema、MCP 客户端 | **核心缺口**：已确定建设 MCP Server、Tool 目录、Schema 版本和执行治理 |
 | 认证/RBAC | Console 已有独立会话，但仍是单管理员配置 | 应补共享会话、管理员/角色/权限和资源归属；不要复制官方未完成的权限实现 |
 
@@ -131,6 +131,7 @@ Spring AI Alibaba Admin 已经不是只有 Prompt 调试页的“小控制台”
 
 - 建设 Agent App/Version、资源绑定、发布、回滚、API Key 和 OpenAPI，运行时固定模型、Prompt、Tool/MCP 和知识库版本。
 - 可视化 Workflow 已纳入目标范围，但排在 Runtime、MCP、知识库、应用版本和评估之后；节点统一委托现有 Runtime，不建立绕过业务门禁的第二套执行链。
+- 交付状态（2026-08-03）：Agent 应用/版本/API Key/OpenAPI（M5）与受控 Workflow Studio（M7）均已完成并通过真实 MySQL 冒烟与全量测试验收；Workflow 写节点仍复用确认门禁与幂等，不存在旁路执行链。
 
 ## 5. 成熟度与安全风险
 
@@ -156,7 +157,7 @@ Spring AI Alibaba Admin 已经不是只有 Prompt 调试页的“小控制台”
 
 - 首先完成真实 SAA Agent/Graph、MySQL/Redis 恢复、安全基座、模型和 Prompt 管理。
 - 随后把 MCP 管理和知识库管理作为必建核心模块并行交付。
-- 再建设 Agent App/Version、发布 OpenAPI、Trace 和评估闭环。
+- Agent App/Version、发布 OpenAPI 已随 M5 交付（版本快照固定模型/Prompt/Tool/MCP/知识库，API Key 仅存 hash，开放接口复用同一 Runtime 门禁）。Trace/Span 可观测与评估闭环已随 M6 交付：Runtime 全链路 Span 埋点（请求/路由/动作/任务/确认/Tool/模型/检索）落 MySQL，Console 提供 Trace 与数据集/评估器/实验页面；实验任务由 MySQL 租约 worker 驱动并支持重启恢复，评估用例复用同一 ChatOrchestrator 门禁链，不复制官方进程内线程池实验方案。
 - 最后交付受控 Workflow Studio，并继续保留 C 端 Chat、内部 Console、访客归属、确认、幂等和任务状态机边界。
 
 下一步应从 P0 的依赖和 Runtime 兼容性验证开始，再按完整计划中的里程碑转成有测试、有迁移、有 API 契约的纵向切片；不直接从官方前端页面反推“复制一套 Admin”作为实现方案。

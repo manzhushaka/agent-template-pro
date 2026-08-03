@@ -5,6 +5,7 @@ dist/
 .codegraph/
 agent-boot/src/main/resources/application-dev.yml
 *.log
+data/
 .DS_Store
 .idea/
 

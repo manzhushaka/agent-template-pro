@@ -1,3 +1,24 @@
+-- 任务领域事件发件箱。V001 已按初始版本在共享环境执行（当前生产库为版本 003），
+-- 不可再修改；本迁移尚未在任何共享环境执行，因此在 V004 顶部先行建表，
+-- 后续语句再演进该表的列与索引，保证全新库与升级库都得到一致结构。
+CREATE TABLE IF NOT EXISTS agent_task_outbox (
+    id VARCHAR(64) PRIMARY KEY,
+    aggregate_type VARCHAR(64) NOT NULL,
+    aggregate_id VARCHAR(64) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    payload_json JSON NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    attempt_count INT NOT NULL DEFAULT 0,
+    available_at DATETIME(6) NULL,
+    lease_owner VARCHAR(128) NULL,
+    lease_until DATETIME(6) NULL,
+    last_error VARCHAR(100) NULL,
+    published_at DATETIME(6) NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    INDEX idx_outbox_dispatch(status, available_at, lease_until, created_at)
+);
+
 SET @sql = IF(
     (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE()
      AND table_name = 'agent_task' AND column_name = 'confirmation_expires_at') = 0,

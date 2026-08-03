@@ -1,0 +1,41 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <!-- 继承根 POM 的统一坐标、版本管理与构建默认配置。 -->
+  <parent>
+    <groupId>com.manzhushaka</groupId>
+    <artifactId>agent-template-pro</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <!-- 面向第三方调用方的受控 Agent 开放 API。 -->
+  <artifactId>api-agent</artifactId>
+  <dependencies>
+    <!-- 复用运行时编排与确认门禁，不建立第二执行链。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>agent-runtime</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- 解析已发布应用、API Key 与受控 OpenAPI。 -->
+    <dependency>
+      <groupId>com.manzhushaka</groupId>
+      <artifactId>agent-control-plane</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- 提供响应式 Web 服务与 SSE。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-webflux</artifactId>
+    </dependency>
+    <!-- 校验开放接口请求参数。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <!-- 测试依赖仅在当前模块测试类路径中生效。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
